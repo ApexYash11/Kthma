@@ -1,0 +1,693 @@
+/*@jsxRuntime automatic @jsxImportSource react*/
+const {Fragment: _Fragment, jsx: _jsx, jsxs: _jsxs} = arguments[0];
+const TableOfContents = ({children}) => children([{
+  href: "#test-cards-for-indian-payments",
+  level: 2,
+  title: "Test Cards for Indian Payments"
+}, {
+  href: "#error-scenarios",
+  level: 3,
+  title: "Error Scenarios"
+}, {
+  href: "#test-cards-for-international-payments",
+  level: 2,
+  title: "Test Cards for International Payments"
+}, {
+  href: "#test-cards-for-subscriptions",
+  level: 2,
+  title: "Test Cards for Subscriptions"
+}, {
+  href: "#test-card-for-emi-payments",
+  level: 2,
+  title: "Test Card for EMI Payments"
+}]);
+function _createMdxContent(props) {
+  const _components = Object.assign({
+    p: "p",
+    strong: "strong",
+    ul: "ul",
+    li: "li",
+    code: "code",
+    ol: "ol",
+    section: "section",
+    h2: "h2",
+    h3: "h3"
+  }, props.components), {Callout, IFrame, FAQs, ContentLink, Table, TableHeader, TableRow, TableCell, TableBody, ContentLoaded} = _components;
+  if (!Callout) _missingMdxReference("Callout", true);
+  if (!ContentLink) _missingMdxReference("ContentLink", true);
+  if (!ContentLoaded) _missingMdxReference("ContentLoaded", true);
+  if (!FAQs) _missingMdxReference("FAQs", true);
+  if (!IFrame) _missingMdxReference("IFrame", true);
+  if (!Table) _missingMdxReference("Table", true);
+  if (!TableBody) _missingMdxReference("TableBody", true);
+  if (!TableCell) _missingMdxReference("TableCell", true);
+  if (!TableHeader) _missingMdxReference("TableHeader", true);
+  if (!TableRow) _missingMdxReference("TableRow", true);
+  return _jsxs(_Fragment, {
+    children: [_jsx(_components.p, {
+      children: "You can test the payment flow using our test cards."
+    }), "\n", _jsxs(Callout, {
+      warn: true,
+      children: [_jsx(_components.p, {
+        children: _jsx(_components.strong, {
+          children: "Watch Out!"
+        })
+      }), _jsxs(_components.ul, {
+        children: ["\n", _jsxs(_components.li, {
+          children: ["You can use these test cards to make payments in ", _jsx(_components.strong, {
+            children: "test"
+          }), " mode only."]
+        }), "\n", _jsxs(_components.li, {
+          children: ["Test mode features a mock bank page with ", _jsx(_components.strong, {
+            children: "Success"
+          }), " and ", _jsx(_components.strong, {
+            children: "Failure"
+          }), " buttons to replicate the live payment experience."]
+        }), "\n", _jsx(_components.li, {
+          children: "No real money is deducted due to the usage of test API keys. This is a simulated transaction."
+        }), "\n", _jsxs(_components.li, {
+          children: ["If you use these test cards for ", _jsx(_components.strong, {
+            children: "live"
+          }), " mode payments, either of the following error message will be displayed: ", _jsx(_components.code, {
+            children: "card issuer is invalid"
+          }), " or ", _jsx(_components.code, {
+            children: "invalid card input"
+          }), "."]
+        }), "\n"]
+      })]
+    }), "\n", _jsx(_components.p, {
+      children: "Watch this video to see how to use the test card details."
+    }), "\n", _jsx(IFrame, {
+      width: "560",
+      height: "315",
+      src: "https://www.youtube.com/embed/2VR0hXpF9RA?si=-meoxCcUgdK8sQsO",
+      title: "Use the test card details",
+      frameborder: "0",
+      allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture",
+      allowfullscreen: true
+    }), "\n", _jsx(FAQs, {
+      accordian: true,
+      children: _jsxs("faq", {
+        children: [_jsx("question", {
+          id: "to-use-the-test-card-details",
+          children: "To use the test card details:"
+        }), _jsx("answer", {
+          children: _jsxs(_components.ol, {
+            children: ["\n", _jsx(_components.li, {
+              children: "At the Checkout, select Card as the payment method."
+            }), "\n", _jsxs(_components.li, {
+              children: ["Enter the ", _jsx(_components.strong, {
+                children: "OTP"
+              }), " to access saved cards if required."]
+            }), "\n", _jsx(_components.li, {
+              children: "Enter the card details. This depends on the flow you are testing."
+            }), "\n", _jsx(_components.li, {
+              children: "Enter any random CVV."
+            }), "\n", _jsx(_components.li, {
+              children: "Enter any future date as the expiry date."
+            }), "\n", _jsxs(_components.li, {
+              children: ["Click ", _jsx(_components.strong, {
+                children: "Pay"
+              }), ". A sample payment page is displayed.", "\n", _jsxs(_components.ul, {
+                children: ["\n", _jsxs(_components.li, {
+                  children: ["Enter a random ", _jsx(_components.strong, {
+                    children: "OTP"
+                  }), " between 4 to 10 digits to make the payment successful and click ", _jsx(_components.strong, {
+                    children: "Submit"
+                  }), "."]
+                }), "\n", _jsxs(_components.li, {
+                  children: ["Enter a random ", _jsx(_components.strong, {
+                    children: "OTP"
+                  }), " below 4 digits to fail the payment and click ", _jsx(_components.strong, {
+                    children: "Submit"
+                  }), "."]
+                }), "\n"]
+              }), "\n"]
+            }), "\n"]
+          })
+        })]
+      })
+    }), "\n", _jsx(_components.p, {
+      children: "Use the following cards for testing. You can use any random CVV and any future date as the expiry date."
+    }), "\n", _jsxs(_components.section, {
+      children: [_jsx(_components.h2, {
+        id: "test-cards-for-indian-payments",
+        children: "Test Cards for Indian Payments"
+      }), "\n", _jsxs(_components.p, {
+        children: ["Use the following test cards to test various payment scenarios for Indian payments. You can save any of the test cards below. The saved card flow allows customers to store their card details for future transactions. When a customer selects the option to save their card, Razorpay handles the tokenization process internally. Know more about ", _jsx(ContentLink, {
+          href: "/payments/payment-methods/cards/features/saved-cards/",
+          target: "_blank",
+          children: "Saved Cards"
+        }), "."]
+      }), "\n", _jsxs(Table, {
+        children: [_jsx(TableHeader, {
+          children: _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              header: true,
+              children: "Network"
+            }), _jsx(TableCell, {
+              header: true,
+              children: "Card Number"
+            }), _jsx(TableCell, {
+              header: true,
+              children: "Card Type"
+            }), _jsx(TableCell, {
+              header: true,
+              children: "Card Sub Type"
+            }), _jsx(TableCell, {
+              header: true,
+              children: "CVV & Expiry Date"
+            })]
+          })
+        }), _jsxs(TableBody, {
+          children: [_jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              children: "Visa"
+            }), _jsx(TableCell, {
+              children: "4100 2800 0000 1007"
+            }), _jsx(TableCell, {
+              children: "Debit"
+            }), _jsx(TableCell, {
+              children: "Consumer"
+            }), _jsx(TableCell, {
+              children: "Use a random CVV and any future date ^^^^^^"
+            })]
+          }), _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              children: "Mastercard"
+            }), _jsx(TableCell, {
+              children: "5555 5100 0008 1006"
+            }), _jsx(TableCell, {
+              children: "Credit"
+            }), _jsx(TableCell, {
+              children: "Business"
+            }), _jsx(TableCell, {})]
+          }), _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              children: "Mastercard"
+            }), _jsx(TableCell, {
+              children: "5180 2872 0009 1001"
+            }), _jsx(TableCell, {
+              children: "Prepaid"
+            }), _jsx(TableCell, {
+              children: "Consumer"
+            }), _jsx(TableCell, {})]
+          }), _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              children: "RuPay"
+            }), _jsx(TableCell, {
+              children: "6527 6589 0000 1005"
+            }), _jsx(TableCell, {
+              children: "Credit"
+            }), _jsx(TableCell, {
+              children: "Consumer"
+            }), _jsx(TableCell, {})]
+          }), _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              children: "Diners"
+            }), _jsx(TableCell, {
+              children: "3608 280009 1007"
+            }), _jsx(TableCell, {
+              children: "Credit"
+            }), _jsx(TableCell, {
+              children: "Consumer"
+            }), _jsx(TableCell, {})]
+          }), _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              children: "Amex"
+            }), _jsx(TableCell, {
+              children: "3402 560004 01007"
+            }), _jsx(TableCell, {
+              children: "Credit"
+            }), _jsx(TableCell, {
+              children: "Consumer"
+            }), _jsx(TableCell, {})]
+          })]
+        })]
+      }), "\n"]
+    }), _jsxs(_components.section, {
+      children: [_jsx(_components.h3, {
+        id: "error-scenarios",
+        children: "Error Scenarios"
+      }), "\n", _jsxs(_components.p, {
+        children: ["Use these test cards to simulate and test various error conditions for the following networks. Once you initiate the payment, in success/failure screen, you must select failure to get the right error. Know more about ", _jsx(ContentLink, {
+          href: "/errors/payments/cards/",
+          target: "_blank",
+          children: "Cards Error Codes"
+        }), "."]
+      }), "\n", _jsxs(FAQs, {
+        accordian: true,
+        children: [_jsxs("faq", {
+          children: [_jsx("question", {
+            id: "bad-request-error",
+            children: "BAD_REQUEST_ERROR"
+          }), _jsx("answer", {
+            children: _jsxs(Table, {
+              children: [_jsx(TableHeader, {
+                children: _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {
+                    header: true,
+                    children: "Error reason"
+                  }), _jsx(TableCell, {
+                    header: true,
+                    children: "Error description"
+                  }), _jsx(TableCell, {
+                    header: true,
+                    children: "Network"
+                  }), _jsx(TableCell, {
+                    header: true,
+                    children: "Card number"
+                  }), _jsx(TableCell, {
+                    header: true,
+                    children: "CVV & expiry date"
+                  })]
+                })
+              }), _jsxs(TableBody, {
+                children: [_jsxs(TableRow, {
+                  children: [_jsxs(TableCell, {
+                    children: [_jsx(_components.code, {
+                      children: "payment_timed_out"
+                    }), " ^^"]
+                  }), _jsx(TableCell, {
+                    children: "Your payment could not be completed due to a temporary issue. Try again later. ^^"
+                  }), _jsx(TableCell, {
+                    children: "Visa"
+                  }), _jsx(TableCell, {
+                    children: "4100 2800 0009 0000"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {}), _jsx(TableCell, {}), _jsx(TableCell, {
+                    children: "Mastercard"
+                  }), _jsx(TableCell, {
+                    children: "5305 6200 0006 0000"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsxs(TableCell, {
+                    children: [_jsx(_components.code, {
+                      children: "insufficient_fund"
+                    }), " ^^"]
+                  }), _jsx(TableCell, {
+                    children: "Your payment could not be completed due to insufficient account balance. Try another card or payment method. ^^"
+                  }), _jsx(TableCell, {
+                    children: "Visa"
+                  }), _jsx(TableCell, {
+                    children: "4100 2800 0008 0001"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {}), _jsx(TableCell, {}), _jsx(TableCell, {
+                    children: "Mastercard"
+                  }), _jsx(TableCell, {
+                    children: "5305 6200 0005 0001"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsxs(TableCell, {
+                    children: [_jsx(_components.code, {
+                      children: "payment_cancelled"
+                    }), " ^^"]
+                  }), _jsx(TableCell, {
+                    children: "Your payment has been cancelled. Try again or complete the payment later. ^^"
+                  }), _jsx(TableCell, {
+                    children: "Visa"
+                  }), _jsx(TableCell, {
+                    children: "4100 2800 0007 0002"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {}), _jsx(TableCell, {}), _jsx(TableCell, {
+                    children: "Mastercard"
+                  }), _jsx(TableCell, {
+                    children: "5305 6200 0004 0002"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsxs(TableCell, {
+                    children: [_jsx(_components.code, {
+                      children: "card_declined"
+                    }), " ^^^^^^"]
+                  }), _jsx(TableCell, {
+                    children: "Your payment did not go through as it was declined by the bank. Try another payment method or contact your bank. ^^^^^^"
+                  }), _jsx(TableCell, {
+                    children: "Visa"
+                  }), _jsx(TableCell, {
+                    children: "4100 2800 0006 0003"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {}), _jsx(TableCell, {}), _jsx(TableCell, {
+                    children: "Mastercard"
+                  }), _jsx(TableCell, {
+                    children: "5305 6200 0003 0003"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {}), _jsx(TableCell, {}), _jsx(TableCell, {
+                    children: "Visa"
+                  }), _jsx(TableCell, {
+                    children: "4100 2800 0005 0004"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {}), _jsx(TableCell, {}), _jsx(TableCell, {
+                    children: "Mastercard"
+                  }), _jsx(TableCell, {
+                    children: "5305 6200 0002 0004"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {}), _jsx(TableCell, {}), _jsx(TableCell, {
+                    children: "Visa"
+                  }), _jsx(TableCell, {
+                    children: "4100 2800 0004 0005"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {}), _jsx(TableCell, {}), _jsx(TableCell, {
+                    children: "Mastercard"
+                  }), _jsx(TableCell, {
+                    children: "5305 6200 0001 0005"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsxs(TableCell, {
+                    children: [_jsx(_components.code, {
+                      children: "card_disabled_for_"
+                    }), " ", _jsx("br", {}), " ", _jsx(_components.code, {
+                      children: "online_payments"
+                    }), " ^^"]
+                  }), _jsxs(TableCell, {
+                    children: ["Your card is disabled for online payments.", " ", _jsx("br", {}), " Please reach to your bank or try with another card. ^^"]
+                  }), _jsx(TableCell, {
+                    children: "Visa"
+                  }), _jsx(TableCell, {
+                    children: "4100 2800 0003 0006"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {}), _jsx(TableCell, {}), _jsx(TableCell, {
+                    children: "Mastercard"
+                  }), _jsx(TableCell, {
+                    children: "5305 6200 0000 0006"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsxs(TableCell, {
+                    children: [_jsx(_components.code, {
+                      children: "card_number_invalid"
+                    }), " ^^"]
+                  }), _jsx(TableCell, {
+                    children: "You have entered an incorrect card number. Try again. ^^"
+                  }), _jsx(TableCell, {
+                    children: "Visa"
+                  }), _jsx(TableCell, {
+                    children: "4100 2800 0001 0008"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {}), _jsx(TableCell, {}), _jsx(TableCell, {
+                    children: "Mastercard"
+                  }), _jsx(TableCell, {
+                    children: "5305 6200 0008 0008"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date"
+                  })]
+                })]
+              })]
+            })
+          })]
+        }), _jsxs("faq", {
+          children: [_jsx("question", {
+            id: "gateway-error",
+            children: "GATEWAY_ERROR"
+          }), _jsx("answer", {
+            children: _jsxs(Table, {
+              children: [_jsx(TableHeader, {
+                children: _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {
+                    header: true,
+                    children: "Error reason"
+                  }), _jsx(TableCell, {
+                    header: true,
+                    children: "Error description"
+                  }), _jsx(TableCell, {
+                    header: true,
+                    children: "Network"
+                  }), _jsx(TableCell, {
+                    header: true,
+                    children: "Card number"
+                  }), _jsx(TableCell, {
+                    header: true,
+                    children: "CVV & expiry date"
+                  })]
+                })
+              }), _jsxs(TableBody, {
+                children: [_jsxs(TableRow, {
+                  children: [_jsxs(TableCell, {
+                    children: [_jsx(_components.code, {
+                      children: "gateway_technical_error"
+                    }), " ^^"]
+                  }), _jsx(TableCell, {
+                    children: "Your payment did not go through due to a temporary issue. Any debited amount will be refunded in 4-5 business days. ^^"
+                  }), _jsx(TableCell, {
+                    children: "Visa"
+                  }), _jsx(TableCell, {
+                    children: "4100 2800 0002 0007"
+                  }), _jsx(TableCell, {
+                    children: "Use a random CVV and any future date ^^^^"
+                  })]
+                }), _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {}), _jsx(TableCell, {}), _jsx(TableCell, {
+                    children: "Mastercard"
+                  }), _jsx(TableCell, {
+                    children: "5305 6200 0009 0007"
+                  }), _jsx(TableCell, {})]
+                }), _jsxs(TableRow, {
+                  children: [_jsxs(TableCell, {
+                    children: [_jsx(_components.code, {
+                      children: "authentication_failed"
+                    }), " ^^"]
+                  }), _jsx(TableCell, {
+                    children: "Your payment could not be completed due to incorrect OTP or verification details. Try another payment method or contact your bank for details. ^^"
+                  }), _jsx(TableCell, {
+                    children: "Visa"
+                  }), _jsx(TableCell, {
+                    children: "4100 2800 0000 0009"
+                  }), _jsx(TableCell, {})]
+                }), _jsxs(TableRow, {
+                  children: [_jsx(TableCell, {}), _jsx(TableCell, {}), _jsx(TableCell, {
+                    children: "Mastercard"
+                  }), _jsx(TableCell, {
+                    children: "5305 6200 0007 0009"
+                  }), _jsx(TableCell, {})]
+                })]
+              })]
+            })
+          })]
+        })]
+      }), "\n"]
+    }), _jsxs(_components.section, {
+      children: [_jsx(_components.h2, {
+        id: "test-cards-for-international-payments",
+        children: "Test Cards for International Payments"
+      }), "\n", _jsxs(Table, {
+        children: [_jsx(TableHeader, {
+          children: _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              header: true,
+              children: "Card Network"
+            }), _jsx(TableCell, {
+              header: true,
+              children: "Card Number"
+            }), _jsx(TableCell, {
+              header: true,
+              children: "CVV & Expiry Date"
+            })]
+          })
+        }), _jsxs(TableBody, {
+          children: [_jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              children: "Mastercard"
+            }), _jsxs(TableCell, {
+              children: ["5555 5555 5555 4444", " ", _jsx("br", {}), " 5105 1051 0510 5100", " ", _jsx("br", {}), " 5104 0600 0000 0008"]
+            }), _jsx(TableCell, {
+              children: "Use a random CVV and any future date ^^"
+            })]
+          }), _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              children: "Visa"
+            }), _jsx(TableCell, {
+              children: "4012 8888 8888 1881"
+            }), _jsx(TableCell, {})]
+          })]
+        })]
+      }), "\n", _jsxs(Callout, {
+        info: true,
+        children: [_jsx(_components.p, {
+          children: _jsx(_components.strong, {
+            children: "Handy Tips"
+          })
+        }), _jsxs(_components.p, {
+          children: ["You may encounter an address collection window when using the Mastercard test card number ", _jsx(_components.code, {
+            children: "5105 1051 0510 5100"
+          }), " for international payments. To complete the test payment, provide the following address details:"]
+        }), _jsxs(_components.ul, {
+          children: ["\n", _jsxs(_components.li, {
+            children: [_jsx(_components.strong, {
+              children: "Address Line 1"
+            }), ": 21 Applegate Apartment"]
+          }), "\n", _jsxs(_components.li, {
+            children: [_jsx(_components.strong, {
+              children: "Address Line 2"
+            }), ": Rockledge Street"]
+          }), "\n", _jsxs(_components.li, {
+            children: [_jsx(_components.strong, {
+              children: "City"
+            }), ": New York"]
+          }), "\n", _jsxs(_components.li, {
+            children: [_jsx(_components.strong, {
+              children: "State"
+            }), ": New York"]
+          }), "\n", _jsxs(_components.li, {
+            children: [_jsx(_components.strong, {
+              children: "Country"
+            }), ": US"]
+          }), "\n", _jsxs(_components.li, {
+            children: [_jsx(_components.strong, {
+              children: "Zipcode"
+            }), ": 11561"]
+          }), "\n"]
+        })]
+      }), "\n"]
+    }), _jsxs(_components.section, {
+      children: [_jsx(_components.h2, {
+        id: "test-cards-for-subscriptions",
+        children: "Test Cards for Subscriptions"
+      }), "\n", _jsxs(Table, {
+        children: [_jsx(TableHeader, {
+          children: _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              header: true,
+              children: "Type"
+            }), _jsx(TableCell, {
+              header: true,
+              children: "Card Network"
+            }), _jsx(TableCell, {
+              header: true,
+              children: "Card Type"
+            }), _jsx(TableCell, {
+              header: true,
+              children: "Card Number"
+            }), _jsx(TableCell, {
+              header: true,
+              children: "CVV & Expiry Date"
+            })]
+          })
+        }), _jsxs(TableBody, {
+          children: [_jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              children: "Domestic"
+            }), _jsx(TableCell, {
+              children: "Visa"
+            }), _jsx(TableCell, {
+              children: "Credit Card"
+            }), _jsx(TableCell, {
+              children: "4718 6091 0820 4366"
+            }), _jsx(TableCell, {
+              children: "Use a random CVV and any future date ^^^"
+            })]
+          }), _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              children: "International"
+            }), _jsx(TableCell, {
+              children: "Mastercard"
+            }), _jsx(TableCell, {
+              children: "Credit Card"
+            }), _jsx(TableCell, {
+              children: "5104 0155 5555 5558"
+            }), _jsx(TableCell, {})]
+          }), _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              children: "International"
+            }), _jsx(TableCell, {
+              children: "Mastercard"
+            }), _jsx(TableCell, {
+              children: "Debit Card"
+            }), _jsx(TableCell, {
+              children: "5104 0600 0000 0008"
+            }), _jsx(TableCell, {})]
+          })]
+        })]
+      }), "\n", _jsxs(Callout, {
+        warn: true,
+        children: [_jsx(_components.p, {
+          children: _jsx(_components.strong, {
+            children: "Watch Out!"
+          })
+        }), _jsx(_components.p, {
+          children: "In test mode, you can perform a subsequent debit only within 3 days of token creation, as card tokens are valid for 3 days only."
+        })]
+      }), "\n"]
+    }), _jsxs(_components.section, {
+      children: [_jsx(_components.h2, {
+        id: "test-card-for-emi-payments",
+        children: "Test Card for EMI Payments"
+      }), "\n", _jsxs(Table, {
+        children: [_jsx(TableHeader, {
+          children: _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              header: true,
+              children: "Card Network"
+            }), _jsx(TableCell, {
+              header: true,
+              children: "Card Number"
+            }), _jsx(TableCell, {
+              header: true,
+              children: "CVV & Expiry Date"
+            })]
+          })
+        }), _jsx(TableBody, {
+          children: _jsxs(TableRow, {
+            children: [_jsx(TableCell, {
+              children: "Mastercard"
+            }), _jsx(TableCell, {
+              children: "5241 8100 0000 0000"
+            }), _jsx(TableCell, {
+              children: "Use a random CVV and any future date"
+            })]
+          })
+        })]
+      }), "\n", _jsx(ContentLoaded, {})]
+    })]
+  });
+}
+function MDXContent(props = {}) {
+  const {wrapper: MDXLayout} = props.components || ({});
+  return MDXLayout ? _jsx(MDXLayout, Object.assign({}, props, {
+    children: _jsx(_createMdxContent, props)
+  })) : _createMdxContent(props);
+}
+return {
+  TableOfContents,
+  default: MDXContent
+};
+function _missingMdxReference(id, component) {
+  throw new Error("Expected " + (component ? "component" : "object") + " `" + id + "` to be defined: you likely forgot to import, pass, or provide it.");
+}

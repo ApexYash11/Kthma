@@ -1,0 +1,18 @@
+---
+description: KTHMA voice, vocabulary, and anti-slop defaults for every session
+alwaysApply: true
+---
+
+# KTHMA
+
+Product name is **KTHMA**, not RevPilot.
+
+Read `AGENTS.md` and `CONTEXT.md` before proposing work. Use glossary terms. Do not invent synonyms.
+
+Voice: direct, concrete, name the file/function/command. No filler. No fake metrics, fake Razorpay calls, or fake reasoning.
+
+Decisions: `grill-with-docs`. Do not also run Superpowers brainstorming on the same decision.
+
+Build: smallest slice, `tdd` at agreed seams, then `code-review`. Pipeline stages are typed modules, not chatty agents.
+
+If the last message did not land, use `wait-what`.
