@@ -56,6 +56,62 @@ def test_features_do_not_expose_ground_truth_fields():
         assert FORBIDDEN_FEATURE_FIELDS.isdisjoint(row.__dataclass_fields__)
 
 
+def test_generate_config_is_available_on_the_seam():
+    from kthma import GenerateConfig
+
+    config = GenerateConfig()
+    dataset = generate(seed=42, n=20, config=config)
+
+    assert len(dataset.development.features) + len(dataset.holdout.features) == 20
+
+
+def test_same_seed_reproduces_full_dataset():
+    first = generate(seed=42, n=50)
+    second = generate(seed=42, n=50)
+
+    assert first.development.features == second.development.features
+    assert first.development.ground_truth == second.development.ground_truth
+    assert first.holdout.features == second.holdout.features
+    assert first.holdout.ground_truth == second.holdout.ground_truth
+
+
+def test_amounts_are_positive_and_vary():
+    dataset = generate(seed=42, n=100)
+    amounts = [row.amount for row in (*dataset.development.ground_truth, *dataset.holdout.ground_truth)]
+
+    assert all(isinstance(a, int) and a > 0 for a in amounts)
+    assert len(set(amounts)) > 1
+
+
+def test_best_action_varies_by_scenario():
+    dataset = generate(seed=42, n=100)
+    actions = {row.best_action for row in (*dataset.development.ground_truth, *dataset.holdout.ground_truth)}
+
+    assert {"retry_payment", "payment_link", "do_nothing"}.issubset(actions)
+
+
+def test_repeated_failure_cases_are_not_recoverable():
+    dataset = generate(seed=42, n=200)
+    pairs = {}
+    for split in (dataset.development, dataset.holdout):
+        features = {f.recovery_case_id: f for f in split.features}
+        for gt in split.ground_truth:
+            pairs[features[gt.recovery_case_id].leakage_type] = gt
+
+    do_nothing = pairs["repeated_failure"]
+    assert do_nothing.recoverable is False
+    assert do_nothing.best_action == "do_nothing"
+    assert do_nothing.expected_outcome == 0
+
+
+def test_recoverable_ground_truth_matches_features_by_case_id():
+    dataset = generate(seed=42, n=100)
+    feature_ids = {f.recovery_case_id for f in dataset.development.features}
+    truth_ids = {g.recovery_case_id for g in dataset.development.ground_truth}
+
+    assert feature_ids == truth_ids
+
+
 def test_n_of_twenty_includes_all_four_leakage_types():
     dataset = generate(seed=42, n=20)
     types = {row.leakage_type for row in (*dataset.development.features, *dataset.holdout.features)}
