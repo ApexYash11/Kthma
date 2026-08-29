@@ -49,6 +49,29 @@ def test_evaluate_endpoint_returns_all_methods(client):
     assert set(data["report"]) == {"Always Retry", "Rule Based", "ML Only", "KTHMA"}
 
 
+def test_approve_endpoint_executes_and_returns_updated_timeline(client):
+    cases = client.get("/api/cases").json()["cases"]
+    abandon = next(c for c in cases if c["type"] == "checkout_abandonment")
+    detail = client.post(f"/api/cases/{abandon['recovery_case_id']}/approve").json()
+    assert detail["executed"] is True
+    assert detail["verification"]["outcome"] == "recovered"
+    stages = [s["stage"] for s in detail["timeline"]]
+    assert stages == ["DETECT", "DIAGNOSE", "DECIDE", "POLICY", "ACT", "VERIFY"]
+
+
+def test_breakdown_endpoint_reports_leakage_by_type(client):
+    data = client.get("/api/breakdown").json()
+    assert set(data["breakdown"]) == {
+        "payment_failure",
+        "checkout_abandonment",
+        "subscription_failure",
+        "repeated_failure",
+    }
+    for entry in data["breakdown"].values():
+        assert entry["cases"] >= 0
+        assert entry["amount_at_risk"] >= 0
+
+
 def test_dashboard_html_carries_banner(client):
     html = client.get("/").text
     assert "DEMO MERCHANT · SYNTHETIC DATA" in html

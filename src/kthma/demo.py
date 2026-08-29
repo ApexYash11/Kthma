@@ -16,14 +16,32 @@ def _pick(dataset: SplitDataset, leakage_type: str, failure_reason: str | None =
     raise LookupError(f"no case for {leakage_type}")
 
 
+def _pick_scenario_a(dataset: SplitDataset, world: dict[str, bool]):
+    """AGENTS.md scenario A: Rs2,499, bank timeout, high intent, recoverable.
+    Pinning may consult ground truth (demo selection, outside the pipeline);
+    the pipeline itself never sees it."""
+    candidates = [
+        f
+        for f in (*dataset.development.features, *dataset.holdout.features)
+        if f.leakage_type == "payment_failure"
+        and f.failure_reason == "bank_timeout"
+        and f.amount == 2499
+        and f.prior_successful_payments >= 3
+        and world.get(f.recovery_case_id, False)
+    ]
+    if candidates:
+        return candidates[0]
+    return _pick(dataset, "payment_failure", "bank_timeout")
+
+
 def run_demo(seed: int = 42) -> str:
-    dataset = generate(seed=seed, n=100)
+    dataset = generate(seed=seed, n=1000)  # large enough to pin all four scenarios
     world = {g.recovery_case_id: g.recoverable for g in (*dataset.development.ground_truth, *dataset.holdout.ground_truth)}
     executor = GroundedSimulatorExecutor(world)
 
     lines = ["KTHMA DEMO · DEMO MERCHANT · SYNTHETIC DATA", ""]
     scenarios = [
-        ("A - Payment failure", _pick(dataset, "payment_failure", "bank_timeout")),
+        ("A - Payment failure", _pick_scenario_a(dataset, world)),
         ("B - Checkout abandonment", _pick(dataset, "checkout_abandonment")),
         ("C - Subscription failure", _pick(dataset, "subscription_failure")),
         ("D - Do nothing (intelligent refusal)", _pick(dataset, "repeated_failure")),

@@ -24,5 +24,21 @@ def test_demo_scenario_d_refuses_to_retry():
     assert "action=do_nothing" in scenario_d
 
 
+def test_demo_scenario_a_is_the_pinned_2499_bank_timeout_case():
+    from kthma import generate
+    from kthma.demo import _pick_scenario_a
+
+    dataset = generate(seed=42, n=1000)
+    world = {
+        g.recovery_case_id: g.recoverable
+        for g in (*dataset.development.ground_truth, *dataset.holdout.ground_truth)
+    }
+    f = _pick_scenario_a(dataset, world)
+    assert f.amount == 2499
+    assert f.failure_reason == "bank_timeout"
+    assert f.prior_successful_payments >= 3
+    assert world[f.recovery_case_id] is True
+
+
 def test_demo_banner_present():
     assert "DEMO MERCHANT · SYNTHETIC DATA" in run_demo()
