@@ -1,24 +1,20 @@
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from random import Random
+
+from kthma.models import (
+    GenerateConfig,
+    GroundTruth,
+    RecoveryCaseFeatures,
+    Split,
+    SplitDataset,
+)
+from kthma.store import load_features, load_ground_truth, save_split
 
 LEAKAGE_TYPES = (
     "payment_failure",
     "checkout_abandonment",
     "subscription_failure",
     "repeated_failure",
-)
-
-RECOVERY_ACTIONS = frozenset(
-    {
-        "retry_payment",
-        "payment_link",
-        "reminder",
-        "alternate_method",
-        "retry_subscription",
-        "escalate",
-        "do_nothing",
-    }
 )
 
 PAYMENT_METHODS = ("upi", "card", "netbanking", "wallet")
@@ -47,65 +43,6 @@ SCENARIO_TAG = {
 }
 
 
-@dataclass(frozen=True)
-class GenerateConfig:
-    leakage_type_weights: dict[str, float] = field(
-        default_factory=lambda: {
-            "payment_failure": 0.40,
-            "checkout_abandonment": 0.30,
-            "subscription_failure": 0.20,
-            "repeated_failure": 0.10,
-        }
-    )
-    recoverable_probability_by_type: dict[str, float] = field(
-        default_factory=lambda: {
-            "payment_failure": 0.85,
-            "checkout_abandonment": 0.80,
-            "subscription_failure": 0.90,
-            "repeated_failure": 0.0,
-        }
-    )
-
-
-@dataclass(frozen=True)
-class RecoveryCaseFeatures:
-    recovery_case_id: str
-    leakage_type: str
-    currency: str
-    payment_method: str
-    failure_reason: str | None
-    attempt_count: int
-    last_attempt_at: str
-    customer_id: str
-    prior_successful_payments: int
-    prior_failures: int
-    days_since_last_success: int
-    subscription_flag: bool
-    checkout_entered_flag: bool
-
-
-@dataclass(frozen=True)
-class GroundTruth:
-    recovery_case_id: str
-    recoverable: bool
-    best_action: str
-    expected_outcome: int
-    amount: int
-    intended_scenario: str
-
-
-@dataclass(frozen=True)
-class Split:
-    features: tuple[RecoveryCaseFeatures, ...] = ()
-    ground_truth: tuple[GroundTruth, ...] = ()
-
-
-@dataclass(frozen=True)
-class SplitDataset:
-    development: Split = Split()
-    holdout: Split = Split()
-
-
 def _sample_leakage_type(rng: Random, config: GenerateConfig) -> str:
     types = tuple(config.leakage_type_weights)
     weights = tuple(config.leakage_type_weights[t] for t in types)
@@ -132,6 +69,7 @@ def _build_row(index: int, leakage_type: str, rng: Random) -> tuple[RecoveryCase
     features = RecoveryCaseFeatures(
         recovery_case_id=f"rc_{index:05d}",
         leakage_type=leakage_type,
+        amount=amount,
         currency="INR",
         payment_method=payment_method,
         failure_reason=failure_reason,
@@ -194,3 +132,16 @@ def generate(seed: int, n: int, config: GenerateConfig | None = None) -> SplitDa
         development=to_split(development_rows),
         holdout=to_split(holdout_rows),
     )
+
+
+__all__ = [
+    "GenerateConfig",
+    "GroundTruth",
+    "RecoveryCaseFeatures",
+    "Split",
+    "SplitDataset",
+    "generate",
+    "load_features",
+    "load_ground_truth",
+    "save_split",
+]

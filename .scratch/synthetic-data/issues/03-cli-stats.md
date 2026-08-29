@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] `--rows` and `--seed` generate and persist
-- [ ] Stats print development/hold-out counts and leakage-type counts
-- [ ] Stats report zero ID overlap
-- [ ] Stats flag missing leakage types when n is below the documented minimum
+- [x] `--rows` and `--seed` generate and persist
+- [x] Stats print development/hold-out counts and leakage-type counts
+- [x] Stats report zero ID overlap
+- [x] Stats flag missing leakage types when n is below the documented minimum

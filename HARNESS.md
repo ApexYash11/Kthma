@@ -57,28 +57,53 @@ Scenarios: payment failure, checkout abandonment, subscription failure, do-nothi
 
 Phase 1 (spec + decisions): done.
 
-Phase 2 Ticket 1 (`01-in-memory-generate.md`): **in progress**. Resume here. Do not start Ticket 2 until Ticket 1 checkboxes are done and tests pass.
+Phase 2: **done.** All four tickets complete, 20/20 tests green. `--rows 5000 --seed 42` yields 4000 / 1000 with zero ID overlap.
 
-Code: `src/kthma/__init__.py`  
-Tests: `tests/test_generate.py`  
-Run: `python -m pytest tests/test_generate.py -v`
+Run the generator:
 
-Passing: 80/20 split, disjoint IDs, seed-stable IDs, ground-truth fields exist, features do not expose label field names.
+```bash
+set PYTHONPATH=src&& python -m kthma.cli --rows 5000 --seed 42 --db dataset.sqlite3
+```
 
-Failing / missing:
+---
 
-- `test_n_of_twenty_includes_all_four_leakage_types` — `RecoveryCaseFeatures` has no `leakage_type`
-- Amounts are dummy `0`; every `best_action` is `retry_payment`
-- Same seed must also reproduce amounts, leakage types, and labels
-- `GenerateConfig` on the seam (defaults are fine)
+## Status after phases 3-8 (all committed)
 
-Then:
+Phases 3-8 are built and tested (52 tests green).
 
-2. Ticket 2 — SQLite persist and reload (features vs ground truth stores)
-3. Ticket 3 — CLI `--rows` `--seed` + stats
-4. Ticket 4 — `--rows 5000 --seed 42` → 4000 / 1000
+- Phase 3: `src/kthma/baselines.py` (always-retry, rule-based, ML-only) + `src/kthma/evaluation.py` scoring seam.
+- Phase 4: `src/kthma/pipeline.py` (DETECT/DIAGNOSE/DECIDE/POLICY/ACT/VERIFY, typed contracts, deterministic judgment) + `src/kthma/execution.py` (labelled Simulator, fail-closed Razorpay, grounded simulator).
+- Phase 5: `src/kthma/report.py` — fit on development, score on hold-out; Always Retry / Rule Based / ML Only / KTHMA.
+- Phase 6: `docs/research/razorpay-test-mode.md` — Razorpay API specifics flagged UNVERIFIED (doc fetch was blocked); executor fails closed without keys.
+- Phase 7: `src/kthma/api.py` — FastAPI + minimal dashboard at `/` with the synthetic-data banner; `uvicorn kthma.api:app` after generating `dataset.sqlite3`.
+- Phase 8: `python -m kthma.demo` — deterministic scenarios A-D, one-click, ends with revenue recovered.
 
-After Phase 2: baselines (Phase 3), then the agent pipeline (Phase 4). Dashboard is Phase 7. Do not start the frontend now.
+## Phase close-out
+
+```text
+COMPLETED
+  Phase 2 (all tickets), Phase 3 baselines + eval seam, Phase 4 agent pipeline,
+  Phase 5 hold-out report, Phase 6 fail-closed Razorpay path + research file,
+  Phase 7 dashboard API + minimal UI, Phase 8 deterministic demo.
+
+TESTED
+  python -m pytest tests/ -q  ->  52 passed
+
+METRICS (from run_evaluation on hold-out, seed 42 — never invented)
+  print via: from kthma import generate; from kthma.report import run_evaluation, format_report
+  Demo run recovers Rs40,997 of Rs43,496 at risk (simulator, scenarios A-D).
+
+KNOWN ISSUES
+  - Razorpay API specifics unverified (docs fetch blocked); Execution stays Simulator (ADR 0003).
+  - Dashboard is functional-minimal, not polished.
+  - ML-only baseline is a pure-python logistic regression, not sklearn/LightGBM.
+  - CLI/Demo need PYTHONPATH=src (package not pip-installed).
+
+NEXT STEP
+  Add Test Mode keys, verify Razorpay docs, wire RazorpayExecutor with a fake-transport test,
+  then polish the dashboard against real API data.
+```
+
 
 Razorpay research file was never written. If you need execute-vs-simulate facts, research official Razorpay docs into `docs/research/razorpay-test-mode.md`. Until Test Mode keys exist, Execution stays a labelled Simulator.
 
