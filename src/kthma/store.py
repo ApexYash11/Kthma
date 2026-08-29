@@ -18,6 +18,7 @@ class FeatureRow(Base):
     recovery_case_id: Mapped[str] = mapped_column(String, primary_key=True)
     split: Mapped[str] = mapped_column(String)
     leakage_type: Mapped[str] = mapped_column(String)
+    amount: Mapped[int] = mapped_column(Integer)
     currency: Mapped[str] = mapped_column(String)
     payment_method: Mapped[str] = mapped_column(String)
     failure_reason: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -60,6 +61,7 @@ def save_split(dataset: SplitDataset, db_path: str) -> None:
                         recovery_case_id=f.recovery_case_id,
                         split=split_name,
                         leakage_type=f.leakage_type,
+                        amount=f.amount,
                         currency=f.currency,
                         payment_method=f.payment_method,
                         failure_reason=f.failure_reason,
@@ -100,6 +102,7 @@ def load_features(db_path: str, split: str) -> tuple[RecoveryCaseFeatures, ...]:
             RecoveryCaseFeatures(
                 recovery_case_id=r.recovery_case_id,
                 leakage_type=r.leakage_type,
+                amount=r.amount,
                 currency=r.currency,
                 payment_method=r.payment_method,
                 failure_reason=r.failure_reason,

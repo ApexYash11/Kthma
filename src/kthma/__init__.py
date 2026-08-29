@@ -69,6 +69,7 @@ def _build_row(index: int, leakage_type: str, rng: Random) -> tuple[RecoveryCase
     features = RecoveryCaseFeatures(
         recovery_case_id=f"rc_{index:05d}",
         leakage_type=leakage_type,
+        amount=amount,
         currency="INR",
         payment_method=payment_method,
         failure_reason=failure_reason,

@@ -25,6 +25,7 @@ class GenerateConfig:
 class RecoveryCaseFeatures:
     recovery_case_id: str
     leakage_type: str
+    amount: int
     currency: str
     payment_method: str
     failure_reason: str | None
