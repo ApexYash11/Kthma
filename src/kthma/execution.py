@@ -40,6 +40,23 @@ class SimulatorExecutor:
         return ExecutionResult(success, "SIMULATOR", detail)
 
 
+class GroundedSimulatorExecutor(SimulatorExecutor):
+    """Simulator grounded in the synthetic world: an action succeeds only when the
+    world (ground truth) says the case was actually recoverable. Decision never
+    sees this mapping; Verification is the world's response."""
+
+    def __init__(self, world: dict[str, bool]) -> None:
+        self.world = world
+
+    def execute(self, request: ExecutionRequest) -> ExecutionResult:
+        result = super().execute(request)
+        if result.success and not self.world.get(request.recovery_case_id, False):
+            return ExecutionResult(
+                False, "SIMULATOR", "simulated world: payment did not complete"
+            )
+        return result
+
+
 class RazorpayExecutor:
     """Razorpay Test Mode path. Fails closed without keys (ADR 0003, ADR 0005)."""
 

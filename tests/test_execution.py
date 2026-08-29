@@ -5,6 +5,17 @@ import pytest
 from kthma.execution import ExecutionRequest, RazorpayExecutor, SimulatorExecutor
 
 
+def test_grounded_simulator_only_recovers_world_recoverable_cases():
+    from kthma.execution import GroundedSimulatorExecutor
+
+    executor = GroundedSimulatorExecutor({"rc_1": True, "rc_2": False})
+    good = executor.execute(ExecutionRequest("rc_1", "payment_link", 2499, approved=True))
+    bad = executor.execute(ExecutionRequest("rc_2", "payment_link", 2499, approved=True))
+    assert good.success is True
+    assert bad.success is False
+    assert bad.adapter == "SIMULATOR"
+
+
 def test_simulator_is_labelled_and_never_fakes_razorpay():
     result = SimulatorExecutor().execute(
         ExecutionRequest("rc_1", "payment_link", 2499, approved=True)
