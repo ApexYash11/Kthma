@@ -57,28 +57,15 @@ Scenarios: payment failure, checkout abandonment, subscription failure, do-nothi
 
 Phase 1 (spec + decisions): done.
 
-Phase 2 Ticket 1 (`01-in-memory-generate.md`): **in progress**. Resume here. Do not start Ticket 2 until Ticket 1 checkboxes are done and tests pass.
+Phase 2: **done.** All four tickets complete, 20/20 tests green. `--rows 5000 --seed 42` yields 4000 / 1000 with zero ID overlap.
 
-Code: `src/kthma/__init__.py`  
-Tests: `tests/test_generate.py`  
-Run: `python -m pytest tests/test_generate.py -v`
+Run the generator:
 
-Passing: 80/20 split, disjoint IDs, seed-stable IDs, ground-truth fields exist, features do not expose label field names.
+```bash
+set PYTHONPATH=src&& python -m kthma.cli --rows 5000 --seed 42 --db dataset.sqlite3
+```
 
-Failing / missing:
-
-- `test_n_of_twenty_includes_all_four_leakage_types` — `RecoveryCaseFeatures` has no `leakage_type`
-- Amounts are dummy `0`; every `best_action` is `retry_payment`
-- Same seed must also reproduce amounts, leakage types, and labels
-- `GenerateConfig` on the seam (defaults are fine)
-
-Then:
-
-2. Ticket 2 — SQLite persist and reload (features vs ground truth stores)
-3. Ticket 3 — CLI `--rows` `--seed` + stats
-4. Ticket 4 — `--rows 5000 --seed 42` → 4000 / 1000
-
-After Phase 2: baselines (Phase 3), then the agent pipeline (Phase 4). Dashboard is Phase 7. Do not start the frontend now.
+Next phase: Phase 3 baselines (always-retry, rule-based, ML-only) run against the persisted development set. Do not start the frontend.
 
 Razorpay research file was never written. If you need execute-vs-simulate facts, research official Razorpay docs into `docs/research/razorpay-test-mode.md`. Until Test Mode keys exist, Execution stays a labelled Simulator.
 

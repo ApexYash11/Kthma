@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] Features and ground truth persist in separate stores sharing recovery-case ID
-- [ ] Reloading features does not expose recoverable, best_action, expected_outcome, or intended scenario
-- [ ] Hold-out ground truth is not returned by a features-only read
-- [ ] Round-trip preserves IDs, amounts, leakage types, and labels
+- [x] Features and ground truth persist in separate stores sharing recovery-case ID
+- [x] Reloading features does not expose recoverable, best_action, expected_outcome, or intended scenario
+- [x] Hold-out ground truth is not returned by a features-only read
+- [x] Round-trip preserves IDs, amounts, leakage types, and labels
