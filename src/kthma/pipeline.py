@@ -109,18 +109,23 @@ def _probability(features: RecoveryCaseFeatures) -> float:
 
 
 def decide(features: RecoveryCaseFeatures) -> Decision:
-    actions = {
-        "checkout_abandonment": "payment_link",
-        "subscription_failure": "retry_subscription",
-    }
     if features.leakage_type == "repeated_failure":
         action = "do_nothing"
         rationale = "multiple recent failures with low recovery probability; do not retry"
+    elif features.leakage_type == "subscription_failure":
+        action = "retry_subscription"
+        rationale = "recurring charge failed with payment history; retry subscription"
+    elif features.leakage_type == "checkout_abandonment":
+        action = "payment_link"
+        rationale = "customer entered payment flow then left; link beats repeated retry"
     elif features.failure_reason == "bank_timeout" and features.prior_successful_payments >= 3:
         action = "retry_payment"
         rationale = "bank timeout with strong payment history; retry is safe"
+    elif features.leakage_type == "payment_failure" and features.failure_reason == "bank_timeout":
+        action = "retry_payment"
+        rationale = "transient bank timeout; retry is safe"
     else:
-        action = actions.get(features.leakage_type, "retry_payment")
+        action = "retry_payment"
         rationale = f"recommended for {features.leakage_type} based on evidence"
 
     probability = _probability(features)
