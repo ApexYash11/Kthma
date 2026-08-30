@@ -5,4 +5,4 @@ __pycache__/
 *.pyc
 node_modules/
 .DS_Store
-`r`n*.sqlite3
+*.sqlite3
