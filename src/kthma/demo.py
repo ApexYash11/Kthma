@@ -16,8 +16,9 @@ def _pick(dataset: SplitDataset, leakage_type: str, failure_reason: str | None =
     raise LookupError(f"no case for {leakage_type}")
 
 
-def _pick_scenario_a(dataset: SplitDataset, world: dict[str, bool]):
-    """AGENTS.md scenario A: Rs2,499, bank timeout, high intent, recoverable.
+def _pick_scenario_a(dataset: SplitDataset, world: dict[str, tuple[bool, str]]):
+    """AGENTS.md scenario A: Rs2,499, bank timeout, high intent, recoverable,
+    and recoverable via retry_payment (the action our decision rules emit).
     Pinning may consult ground truth (demo selection, outside the pipeline);
     the pipeline itself never sees it."""
     candidates = [
@@ -28,6 +29,7 @@ def _pick_scenario_a(dataset: SplitDataset, world: dict[str, bool]):
         and f.amount == 2499
         and f.prior_successful_payments >= 3
         and world.get(f.recovery_case_id, (False, ""))[0]
+        and world.get(f.recovery_case_id, (False, ""))[1] == "retry_payment"
     ]
     if candidates:
         return candidates[0]

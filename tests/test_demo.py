@@ -38,6 +38,7 @@ def test_demo_scenario_a_is_the_pinned_2499_bank_timeout_case():
     assert f.failure_reason == "bank_timeout"
     assert f.prior_successful_payments >= 3
     assert world[f.recovery_case_id][0] is True
+    assert world[f.recovery_case_id][1] == "retry_payment"
 
 
 def test_demo_banner_present():

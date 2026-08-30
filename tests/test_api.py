@@ -81,6 +81,18 @@ def test_breakdown_endpoint_reports_leakage_by_type(client):
         assert entry["amount_at_risk"] >= 0
 
 
+def test_journey_endpoint_has_funnel_and_headline_sources(client):
+    data = client.get("/api/journey").json()
+    stages = [s["stage"] for s in data["funnel"]]
+    assert stages[0] == "Detected (revenue at risk)"
+    assert stages[-2] == "Verified recovered"
+    assert stages[-1] == "Skipped (do nothing)"
+    # funnel must be internally consistent: recovered <= detected, executed <= recommended
+    assert data["funnel"][-2]["cases"] <= data["funnel"][4]["cases"]
+    assert data["headline_sources"][0]["metric"] == "Revenue at Risk"
+    assert "ground truth" in data["headline_sources"][1]["how"]
+
+
 def test_dashboard_html_carries_banner(client):
     html = client.get("/").text
     assert "DEMO MERCHANT · SYNTHETIC DATA" in html

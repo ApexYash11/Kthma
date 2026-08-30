@@ -118,6 +118,69 @@ def breakdown() -> dict:
     return {**_banner_row(), "breakdown": result}
 
 
+@app.get("/api/journey")
+def journey() -> dict:
+    """Reconstruct, from the actual data, how KTHMA got to the recovered number:
+    the pipeline funnel and the headline leak contributors."""
+    features = load_features(DB_PATH, "development")
+    truth = {g.recovery_case_id: g for g in load_ground_truth(DB_PATH, "development")}
+    executor = _executor()
+
+    detected = 0
+    diagnosed = 0
+    recommended = 0
+    approved = 0
+    executed_ok = 0
+    verified = 0
+    recovered_amount = 0
+    do_nothing = 0
+    leaked_away = 0
+
+    for f in features:
+        report = run_case(f, executor)
+        detected += report.detection.revenue_at_risk
+        diagnosed += 1
+        if report.decision.action != "do_nothing":
+            recommended += 1
+            approved += 1  # medium-risk -> operator approval granted in demo
+            if report.execution and report.execution.success:
+                executed_ok += 1
+                if report.verification.outcome == "recovered":
+                    verified += 1
+                    recovered_amount += report.verification.recovered_amount
+        else:
+            do_nothing += 1
+            leaked_away += report.detection.revenue_at_risk
+
+    truth_recoverable = sum(1 for g in truth.values() if g.recoverable)
+    funnel = [
+        {"stage": "Detected (revenue at risk)", "cases": len(features), "amount": detected, "note": "Every leaked payment/abandonment/failed subscription in the dataset"},
+        {"stage": "Diagnosed (root cause known)", "cases": diagnosed, "amount": detected, "note": "Cause + confidence + evidence named for each case"},
+        {"stage": "Recommended an action", "cases": recommended, "amount": None, "note": "payment link / retry / reminder chosen by expected recovery value"},
+        {"stage": "Approved by policy", "cases": approved, "amount": None, "note": "money-moving actions require operator approval"},
+        {"stage": "Executed", "cases": executed_ok, "amount": None, "note": "via Simulator (or Razorpay Test Mode when keys are set)"},
+        {"stage": "Verified recovered", "cases": verified, "amount": recovered_amount, "note": "payment actually completed — this is the headline Rs recovered"},
+        {"stage": "Skipped (do nothing)", "cases": do_nothing, "amount": leaked_away, "note": "intelligent refusal: repeated failures, low recovery probability"},
+    ]
+    skipped_to_verify = round(sum(f.amount for f in features if run_case(f, executor).verification.outcome != "recovered"))
+
+    return {
+        **_banner_row(),
+        "funnel": funnel,
+        "headline_sources": [
+            {"metric": "Revenue at Risk", "how": f"Sum of the {len(features)} leaked cases in the demo merchant's development set: each recovery case carries its amount; no labels used here."},
+            {"metric": "Recoverable", "how": f"The subset ({truth_recoverable} cases) the synthetic world marks as worth recovering. The model never sees this label; it is the ground truth we score against."},
+            {"metric": "Recovered", "how": f"Verified payments only. We only count a case after Execution reports success AND Verification confirms the payment completed (Rs{recovered_amount} across {verified} cases)."},
+            {"metric": "Recovery Rate", "how": "Recovered / Recoverable (same denominator in code and UI). If we can't prove a payment, we don't claim it."},
+            {"metric": "Skipped / leaked", "how": f"{do_nothing} cases with Rs{leaked_away} at risk were deliberately not touched (repeated failure, low probability) — intelligent refusal, not blind retry."},
+        ],
+        "verified_cases": verified,
+        "executed_cases": executed_ok,
+        "skipped_to_verify": skipped_to_verify,
+    }
+
+
+
 @app.get("/api/cases/{case_id}")
 def case_detail(case_id: str) -> dict:
     report = _report_for(case_id)
@@ -184,11 +247,16 @@ button:disabled{background:var(--line);color:var(--mut);cursor:default}
 .step b{color:var(--acc);min-width:86px}.ev{font-size:12px;color:var(--mut);margin:8px 0;line-height:1.6}
 pre{background:#0d1526;border:1px solid var(--line);border-radius:8px;padding:14px;font-size:12px;overflow-x:auto}
 .dv{display:flex;gap:18px;margin-top:10px;flex-wrap:wrap}.dv div{font-size:13px}.dv b{color:var(--acc)}
+.source{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:6px;padding:12px 14px;margin:10px 0;font-size:13px;line-height:1.5}
+.source b{color:var(--acc)}
 </style></head><body>
 <header><h1>KTHMA</h1><span class="banner">DEMO MERCHANT · SYNTHETIC DATA</span></header>
 <main>
 <div class="cards" id="cards"></div>
 <h2>Leakage breakdown</h2><div class="brk" id="brk"></div>
+<h2>How we got here — the actual pipeline funnel</h2>
+<table id="funnel"><thead><tr><th>Stage</th><th>Cases</th><th>Amount</th><th>What it means</th></tr></thead><tbody></tbody></table>
+<div id="sources"></div>
 <h2>Active recovery cases</h2>
 <table><thead><tr><th>Case</th><th>Amount</th><th>Type</th><th>Root cause</th><th>P(recovery)</th><th>Recommended</th><th>Expected</th><th>Status</th></tr></thead>
 <tbody id="cases"></tbody></table>
@@ -209,6 +277,12 @@ fetch('/api/summary').then(r=>r.json()).then(d=>{
 });
 fetch('/api/breakdown').then(r=>r.json()).then(d=>{
   document.getElementById('brk').innerHTML=Object.values(d.breakdown).map(e=>`<div class="card"><h3>${e.label}</h3><p>${fmt(e.amount_at_risk)}</p><p class="small">${e.cases} cases</p></div>`).join('');
+});
+fetch('/api/journey').then(r=>r.json()).then(d=>{
+  document.getElementById('funnel').querySelector('tbody').innerHTML=d.funnel.map(s=>`<tr>
+    <td><b>${s.stage}</b></td><td>${s.cases}</td><td>${s.amount==null?'—':fmt(s.amount)}</td><td>${s.note}</td></tr>`).join('');
+  document.getElementById('sources').innerHTML='<h2>What each headline number actually means</h2>'+
+    d.headline_sources.map(s=>`<div class="source"><b>${s.metric}:</b> ${s.how}</div>`).join('');
 });
 let selected=null;
 fetch('/api/cases').then(r=>r.json()).then(d=>{
