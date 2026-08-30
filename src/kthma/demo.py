@@ -27,7 +27,7 @@ def _pick_scenario_a(dataset: SplitDataset, world: dict[str, bool]):
         and f.failure_reason == "bank_timeout"
         and f.amount == 2499
         and f.prior_successful_payments >= 3
-        and world.get(f.recovery_case_id, False)
+        and world.get(f.recovery_case_id, (False, ""))[0]
     ]
     if candidates:
         return candidates[0]
@@ -36,7 +36,10 @@ def _pick_scenario_a(dataset: SplitDataset, world: dict[str, bool]):
 
 def run_demo(seed: int = 42) -> str:
     dataset = generate(seed=seed, n=1000)  # large enough to pin all four scenarios
-    world = {g.recovery_case_id: g.recoverable for g in (*dataset.development.ground_truth, *dataset.holdout.ground_truth)}
+    world = {
+        g.recovery_case_id: (g.recoverable, g.best_action)
+        for g in (*dataset.development.ground_truth, *dataset.holdout.ground_truth)
+    }
     executor = GroundedSimulatorExecutor(world)
 
     lines = ["KTHMA DEMO · DEMO MERCHANT · SYNTHETIC DATA", ""]

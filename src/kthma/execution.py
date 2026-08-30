@@ -41,16 +41,19 @@ class SimulatorExecutor:
 
 
 class GroundedSimulatorExecutor(SimulatorExecutor):
-    """Simulator grounded in the synthetic world: an action succeeds only when the
-    world (ground truth) says the case was actually recoverable. Decision never
-    sees this mapping; Verification is the world's response."""
+    """Simulator grounded in the synthetic world: an action completes only when
+    the world (ground truth) says the case was recoverable AND the action taken
+    matches the world's best action. Decision never sees this mapping;
+    Verification is the world's response. This keeps the dashboard honest and
+    consistent with the evaluation report."""
 
-    def __init__(self, world: dict[str, bool]) -> None:
+    def __init__(self, world: dict[str, tuple[bool, str]]) -> None:
         self.world = world
 
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
         result = super().execute(request)
-        if result.success and not self.world.get(request.recovery_case_id, False):
+        recoverable, best_action = self.world.get(request.recovery_case_id, (False, ""))
+        if result.success and (not recoverable or request.action != best_action):
             return ExecutionResult(
                 False, "SIMULATOR", "simulated world: payment did not complete"
             )

@@ -30,14 +30,14 @@ def test_demo_scenario_a_is_the_pinned_2499_bank_timeout_case():
 
     dataset = generate(seed=42, n=1000)
     world = {
-        g.recovery_case_id: g.recoverable
+        g.recovery_case_id: (g.recoverable, g.best_action)
         for g in (*dataset.development.ground_truth, *dataset.holdout.ground_truth)
     }
     f = _pick_scenario_a(dataset, world)
     assert f.amount == 2499
     assert f.failure_reason == "bank_timeout"
     assert f.prior_successful_payments >= 3
-    assert world[f.recovery_case_id] is True
+    assert world[f.recovery_case_id][0] is True
 
 
 def test_demo_banner_present():

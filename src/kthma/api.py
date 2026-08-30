@@ -47,7 +47,9 @@ def _executor():
             key_id=os.environ["RAZORPAY_KEY_ID"], key_secret=os.environ["RAZORPAY_KEY_SECRET"]
         )
         return HybridRazorpayExecutor(transport)
-    return GroundedSimulatorExecutor({g.recovery_case_id: g.recoverable for g in _all_truth()})
+    return GroundedSimulatorExecutor(
+        {g.recovery_case_id: (g.recoverable, g.best_action) for g in _all_truth()}
+    )
 
 
 def _report_for(case_id: str) -> CaseReport:
@@ -55,11 +57,6 @@ def _report_for(case_id: str) -> CaseReport:
     if match is None:
         raise HTTPException(status_code=404, detail="recovery case not found")
     return run_case(match, _executor())
-
-
-def _executor():
-    truth = load_ground_truth(DB_PATH, "development") + load_ground_truth(DB_PATH, "holdout")
-    return GroundedSimulatorExecutor({g.recovery_case_id: g.recoverable for g in truth})
 
 
 @app.get("/api/summary")

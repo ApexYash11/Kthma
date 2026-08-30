@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kthma import generate, save_split
+from kthma.execution import GroundedSimulatorExecutor
 from kthma import api
 
 
@@ -13,6 +14,14 @@ def client(tmp_path, monkeypatch):
     save_split(generate(seed=42, n=100), db_path)
     monkeypatch.setattr(api, "DB_PATH", db_path)
     return TestClient(api.app)
+
+
+@pytest.fixture()
+def executor():
+    truth = api._all_truth()
+    return GroundedSimulatorExecutor(
+        {g.recovery_case_id: (g.recoverable, g.best_action) for g in truth}
+    )
 
 
 def test_summary_reports_banner_and_headline_metrics(client):
