@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import math
 from random import Random
 
 from kthma.models import (
@@ -8,6 +9,7 @@ from kthma.models import (
     Split,
     SplitDataset,
 )
+from kthma.recovery_model import RecoveryPolicy, fit_policy
 from kthma.store import load_features, load_ground_truth, save_split
 
 LEAKAGE_TYPES = (
@@ -42,11 +44,64 @@ SCENARIO_TAG = {
     "repeated_failure": "D",
 }
 
+RECOVERABLE_THRESHOLD = 0.5
+
+
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
+
 
 def _sample_leakage_type(rng: Random, config: GenerateConfig) -> str:
     types = tuple(config.leakage_type_weights)
     weights = tuple(config.leakage_type_weights[t] for t in types)
     return rng.choices(types, weights=weights, k=1)[0]
+
+
+def _resolve_outcome(features: RecoveryCaseFeatures, rng: Random) -> tuple[bool, str, int]:
+    """Derive recoverable/best_action/expected_outcome from context.
+
+    This is the learnable signal: recoverability and the best recovery move
+    depend on a latent per-customer 'account health' plus feature interactions
+    (e.g. bank_timeout + cards -> retry wins; auth/insufficient + wallet ->
+    payment link wins; low health + repeated attempts -> nothing works). Small
+    noise keeps it realistic. A rules engine (which keys off leakage_type only)
+    is wrong on a meaningful share; a model that captures interactions learns it.
+    """
+    health = (
+        0.5
+        + min(features.prior_successful_payments, 10) * 0.06
+        - features.prior_failures * 0.15
+        + rng.gauss(0.0, 0.12)
+    )
+
+    if features.leakage_type == "repeated_failure":
+        return False, "do_nothing", 0
+
+    probs: dict[str, float] = {}
+    if features.leakage_type == "payment_failure":
+        retry_score = (
+            (1.5 if features.failure_reason == "bank_timeout" else -0.4 if features.failure_reason == "insufficient_funds" else 0.0)
+            + (0.4 if features.payment_method in ("upi", "card") else 0.0)
+            + health
+        )
+        link_score = (
+            (1.5 if features.failure_reason in ("authentication_failed", "insufficient_funds") else 0.0)
+            + (0.3 if features.payment_method == "wallet" else 0.0)
+            + health
+            - 0.25 * (features.days_since_last_success / 30.0)
+        )
+        probs["retry_payment"] = _sigmoid(retry_score)
+        probs["payment_link"] = _sigmoid(link_score)
+    elif features.leakage_type == "checkout_abandonment":
+        probs["payment_link"] = _sigmoid(health - 0.4 - 0.15 * (features.days_since_last_success / 30.0))
+    elif features.leakage_type == "subscription_failure":
+        probs["retry_subscription"] = _sigmoid(health + 0.3 - features.prior_failures * 0.2)
+
+    best_action = max(probs, key=probs.get)
+    recoverable = probs[best_action] >= RECOVERABLE_THRESHOLD
+    if recoverable:
+        return True, best_action, features.amount
+    return False, "do_nothing", 0
 
 
 def _build_row(index: int, leakage_type: str, rng: Random) -> tuple[RecoveryCaseFeatures, GroundTruth]:
@@ -83,14 +138,7 @@ def _build_row(index: int, leakage_type: str, rng: Random) -> tuple[RecoveryCase
         checkout_entered_flag=leakage_type == "checkout_abandonment",
     )
 
-    recoverable = rng.random() < 0.95 and leakage_type != "repeated_failure"
-    action_pool = SCENARIO_ACTION[leakage_type]
-    if recoverable:
-        best_action = rng.choice(action_pool)
-        expected_outcome = amount
-    else:
-        best_action = action_pool[-1] if leakage_type == "repeated_failure" else rng.choice((*action_pool, "escalate"))
-        expected_outcome = 0
+    recoverable, best_action, expected_outcome = _resolve_outcome(features, rng)
 
     truth = GroundTruth(
         recovery_case_id=features.recovery_case_id,
@@ -144,4 +192,6 @@ __all__ = [
     "load_features",
     "load_ground_truth",
     "save_split",
+    "RecoveryPolicy",
+    "fit_policy",
 ]

@@ -8,6 +8,7 @@ from kthma.baselines import AlwaysRetryBaseline, MLOnlyBaseline, RuleBasedBaseli
 from kthma.evaluation import Metrics, Prediction, score
 from kthma.models import SplitDataset
 from kthma.pipeline import decide
+from kthma.recovery_model import fit_policy
 
 
 @dataclass(frozen=True)
@@ -17,10 +18,12 @@ class EvaluationReport:
 
 
 def _kthma_predictions(dataset: SplitDataset, split: str) -> list[Prediction]:
+    """KTHMA predicts with a policy learned on development only."""
     split_data = dataset.development if split == "development" else dataset.holdout
+    policy = fit_policy(dataset.development, seed=42)
     predictions = []
     for f in split_data.features:
-        decision = decide(f)
+        decision = decide(f, policy)
         predictions.append(
             Prediction(
                 recovery_case_id=f.recovery_case_id,
@@ -53,6 +56,11 @@ def run_evaluation(dataset: SplitDataset) -> EvaluationReport:
     return EvaluationReport(methods=methods)
 
 
+def incremental_vs(report: EvaluationReport, method: str) -> float:
+    """Additional money KTHMA recovered over a baseline."""
+    return report.methods["KTHMA"].revenue_recovered - report.methods[method].revenue_recovered
+
+
 def format_report(report: EvaluationReport) -> str:
     header = f"{'METHOD':<16}{'RECOVERY':>12}{'WRONG ACTIONS':>16}{'ACTION ACC':>12}"
     lines = [header]
@@ -61,4 +69,7 @@ def format_report(report: EvaluationReport) -> str:
         lines.append(
             f"{name:<16}{'Rs' + format(m.revenue_recovered, ','):>12}{wrong_actions:>16}{m.action_accuracy:>12.3f}"
         )
+    lines.append("")
+    lines.append(f"INCREMENTAL (KTHMA vs Rule Based): +Rs{format(incremental_vs(report, 'Rule Based'), ',')}")
+    lines.append(f"INCREMENTAL (KTHMA vs Always Retry): +Rs{format(incremental_vs(report, 'Always Retry'), ',')}")
     return "\n".join(lines)

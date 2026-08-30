@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from kthma.execution import ExecutionRequest, ExecutionResult, Executor, SimulatorExecutor
 from kthma.models import RecoveryCaseFeatures
+from kthma.recovery_model import RecoveryPolicy, recovery_value
 
 MONEY_MOVING = frozenset({"retry_payment", "retry_subscription", "payment_link"})
 
@@ -108,7 +109,29 @@ def _probability(features: RecoveryCaseFeatures) -> float:
     return round(min(max(base, 0.05), 0.95), 2)
 
 
-def decide(features: RecoveryCaseFeatures) -> Decision:
+def decide(
+    features: RecoveryCaseFeatures,
+    policy: RecoveryPolicy | None = None,
+) -> Decision:
+    """Choose a recovery action. When a learned policy is provided it selects by
+    expected recovery value (amount x probability, do_nothing on the same axis);
+    otherwise a deterministic rule default covers cold-start and unit tests."""
+    if policy is not None:
+        action, probability = policy.predict(features)
+        expected = recovery_value(action, features.amount, probability)
+        if action == "do_nothing":
+            rationale = "learned: value below intervention cost; do not recover"
+        else:
+            rationale = f"learned policy ranked {action} highest by expected recovery value"
+        return Decision(
+            recovery_case_id=features.recovery_case_id,
+            action=action,
+            amount=features.amount,
+            probability_of_success=round(probability, 2),
+            expected_recovery_value=expected,
+            rationale=rationale,
+        )
+
     if features.leakage_type == "repeated_failure":
         action = "do_nothing"
         rationale = "multiple recent failures with low recovery probability; do not retry"
