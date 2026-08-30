@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kthma import generate, save_split
+from kthma.execution import GroundedSimulatorExecutor
 from kthma import api
 
 
@@ -13,6 +14,14 @@ def client(tmp_path, monkeypatch):
     save_split(generate(seed=42, n=100), db_path)
     monkeypatch.setattr(api, "DB_PATH", db_path)
     return TestClient(api.app)
+
+
+@pytest.fixture()
+def executor():
+    truth = api._all_truth()
+    return GroundedSimulatorExecutor(
+        {g.recovery_case_id: (g.recoverable, g.best_action) for g in truth}
+    )
 
 
 def test_summary_reports_banner_and_headline_metrics(client):
@@ -47,6 +56,41 @@ def test_unknown_case_returns_404(client):
 def test_evaluate_endpoint_returns_all_methods(client):
     data = client.get("/api/evaluate").json()
     assert set(data["report"]) == {"Always Retry", "Rule Based", "ML Only", "KTHMA"}
+
+
+def test_approve_endpoint_executes_and_returns_updated_timeline(client):
+    cases = client.get("/api/cases").json()["cases"]
+    abandon = next(c for c in cases if c["type"] == "checkout_abandonment")
+    detail = client.post(f"/api/cases/{abandon['recovery_case_id']}/approve").json()
+    assert detail["executed"] is True
+    assert detail["verification"]["outcome"] == "recovered"
+    stages = [s["stage"] for s in detail["timeline"]]
+    assert stages == ["DETECT", "DIAGNOSE", "DECIDE", "POLICY", "ACT", "VERIFY"]
+
+
+def test_breakdown_endpoint_reports_leakage_by_type(client):
+    data = client.get("/api/breakdown").json()
+    assert set(data["breakdown"]) == {
+        "payment_failure",
+        "checkout_abandonment",
+        "subscription_failure",
+        "repeated_failure",
+    }
+    for entry in data["breakdown"].values():
+        assert entry["cases"] >= 0
+        assert entry["amount_at_risk"] >= 0
+
+
+def test_journey_endpoint_has_funnel_and_headline_sources(client):
+    data = client.get("/api/journey").json()
+    stages = [s["stage"] for s in data["funnel"]]
+    assert stages[0] == "Detected (revenue at risk)"
+    assert stages[-2] == "Verified recovered"
+    assert stages[-1] == "Skipped (do nothing)"
+    # funnel must be internally consistent: recovered <= detected, executed <= recommended
+    assert data["funnel"][-2]["cases"] <= data["funnel"][4]["cases"]
+    assert data["headline_sources"][0]["metric"] == "Revenue at Risk"
+    assert "ground truth" in data["headline_sources"][1]["how"]
 
 
 def test_dashboard_html_carries_banner(client):

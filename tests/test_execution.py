@@ -8,12 +8,16 @@ from kthma.execution import ExecutionRequest, RazorpayExecutor, SimulatorExecuto
 def test_grounded_simulator_only_recovers_world_recoverable_cases():
     from kthma.execution import GroundedSimulatorExecutor
 
-    executor = GroundedSimulatorExecutor({"rc_1": True, "rc_2": False})
+    executor = GroundedSimulatorExecutor(
+        {"rc_1": (True, "payment_link"), "rc_2": (False, "payment_link"), "rc_3": (True, "retry_payment")}
+    )
     good = executor.execute(ExecutionRequest("rc_1", "payment_link", 2499, approved=True))
-    bad = executor.execute(ExecutionRequest("rc_2", "payment_link", 2499, approved=True))
+    bad_world = executor.execute(ExecutionRequest("rc_2", "payment_link", 2499, approved=True))
+    wrong_action = executor.execute(ExecutionRequest("rc_3", "payment_link", 2499, approved=True))
     assert good.success is True
-    assert bad.success is False
-    assert bad.adapter == "SIMULATOR"
+    assert bad_world.success is False
+    assert wrong_action.success is False
+    assert all(r.adapter == "SIMULATOR" for r in (good, bad_world, wrong_action))
 
 
 def test_simulator_is_labelled_and_never_fakes_razorpay():

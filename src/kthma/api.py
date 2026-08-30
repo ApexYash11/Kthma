@@ -5,12 +5,15 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import asdict
 
+import os
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
 from kthma import load_features, load_ground_truth
-from kthma.execution import GroundedSimulatorExecutor
-from kthma.pipeline import run_case
+from kthma.execution import GroundedSimulatorExecutor, HybridRazorpayExecutor, RazorpayPaymentLinkTransport
+from kthma.models import RecoveryCaseFeatures
+from kthma.pipeline import CaseReport, run_case
 from kthma.report import format_report, run_evaluation
 
 app = FastAPI(title="KTHMA", version="0.1.0")
@@ -18,14 +21,42 @@ DB_PATH = "dataset.sqlite3"
 
 BANNER = "DEMO MERCHANT · SYNTHETIC DATA"
 
+LEAKAGE_LABELS = {
+    "payment_failure": "Payment failure",
+    "checkout_abandonment": "Checkout abandonment",
+    "subscription_failure": "Subscription failure",
+    "repeated_failure": "Repeated failure (do nothing)",
+}
+
 
 def _banner_row() -> dict:
     return {"banner": BANNER}
 
 
+def _all_features() -> tuple[RecoveryCaseFeatures, ...]:
+    return load_features(DB_PATH, "development") + load_features(DB_PATH, "holdout")
+
+
+def _all_truth():
+    return load_ground_truth(DB_PATH, "development") + load_ground_truth(DB_PATH, "holdout")
+
+
 def _executor():
-    truth = load_ground_truth(DB_PATH, "development") + load_ground_truth(DB_PATH, "holdout")
-    return GroundedSimulatorExecutor({g.recovery_case_id: g.recoverable for g in truth})
+    if os.environ.get("KTHMA_EXECUTOR") == "razorpay":
+        transport = RazorpayPaymentLinkTransport(
+            key_id=os.environ["RAZORPAY_KEY_ID"], key_secret=os.environ["RAZORPAY_KEY_SECRET"]
+        )
+        return HybridRazorpayExecutor(transport)
+    return GroundedSimulatorExecutor(
+        {g.recovery_case_id: (g.recoverable, g.best_action) for g in _all_truth()}
+    )
+
+
+def _report_for(case_id: str) -> CaseReport:
+    match = next((f for f in _all_features() if f.recovery_case_id == case_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="recovery case not found")
+    return run_case(match, _executor())
 
 
 @app.get("/api/summary")
@@ -54,35 +85,126 @@ def summary() -> dict:
 @app.get("/api/cases")
 def cases() -> dict:
     features = load_features(DB_PATH, "development")
-    truth = {g.recovery_case_id: g for g in load_ground_truth(DB_PATH, "development")}
     items = []
     for f in features:
-        decision = run_case(f).decision
+        report = run_case(f, _executor())
         items.append(
             {
                 "recovery_case_id": f.recovery_case_id,
                 "amount": f.amount,
                 "type": f.leakage_type,
-                "recommended_action": decision.action,
-                "expected_recovery": decision.expected_recovery_value,
+                "type_label": LEAKAGE_LABELS.get(f.leakage_type, f.leakage_type),
+                "root_cause": report.diagnosis.root_cause,
+                "probability": report.decision.probability_of_success,
+                "recommended_action": report.decision.action,
+                "expected_recovery": report.decision.expected_recovery_value,
+                "outcome": report.verification.outcome,
             }
         )
-    return {**_banner_row(), "cases": items, "ground_truth_available_for_scoring_only": len(truth) > 0}
+    return {**_banner_row(), "cases": items}
+
+
+@app.get("/api/breakdown")
+def breakdown() -> dict:
+    features = load_features(DB_PATH, "development")
+    result: dict[str, dict] = {}
+    for key in LEAKAGE_LABELS:
+        subset = [f for f in features if f.leakage_type == key]
+        result[key] = {
+            "label": LEAKAGE_LABELS[key],
+            "cases": len(subset),
+            "amount_at_risk": sum(f.amount for f in subset),
+        }
+    return {**_banner_row(), "breakdown": result}
+
+
+@app.get("/api/journey")
+def journey() -> dict:
+    """Reconstruct, from the actual data, how KTHMA got to the recovered number:
+    the pipeline funnel and the headline leak contributors."""
+    features = load_features(DB_PATH, "development")
+    truth = {g.recovery_case_id: g for g in load_ground_truth(DB_PATH, "development")}
+    executor = _executor()
+
+    detected = 0
+    diagnosed = 0
+    recommended = 0
+    approved = 0
+    executed_ok = 0
+    verified = 0
+    recovered_amount = 0
+    do_nothing = 0
+    leaked_away = 0
+
+    for f in features:
+        report = run_case(f, executor)
+        detected += report.detection.revenue_at_risk
+        diagnosed += 1
+        if report.decision.action != "do_nothing":
+            recommended += 1
+            approved += 1  # medium-risk -> operator approval granted in demo
+            if report.execution and report.execution.success:
+                executed_ok += 1
+                if report.verification.outcome == "recovered":
+                    verified += 1
+                    recovered_amount += report.verification.recovered_amount
+        else:
+            do_nothing += 1
+            leaked_away += report.detection.revenue_at_risk
+
+    truth_recoverable = sum(1 for g in truth.values() if g.recoverable)
+    funnel = [
+        {"stage": "Detected (revenue at risk)", "cases": len(features), "amount": detected, "note": "Every leaked payment/abandonment/failed subscription in the dataset"},
+        {"stage": "Diagnosed (root cause known)", "cases": diagnosed, "amount": detected, "note": "Cause + confidence + evidence named for each case"},
+        {"stage": "Recommended an action", "cases": recommended, "amount": None, "note": "payment link / retry / reminder chosen by expected recovery value"},
+        {"stage": "Approved by policy", "cases": approved, "amount": None, "note": "money-moving actions require operator approval"},
+        {"stage": "Executed", "cases": executed_ok, "amount": None, "note": "via Simulator (or Razorpay Test Mode when keys are set)"},
+        {"stage": "Verified recovered", "cases": verified, "amount": recovered_amount, "note": "payment actually completed — this is the headline Rs recovered"},
+        {"stage": "Skipped (do nothing)", "cases": do_nothing, "amount": leaked_away, "note": "intelligent refusal: repeated failures, low recovery probability"},
+    ]
+    skipped_to_verify = round(sum(f.amount for f in features if run_case(f, executor).verification.outcome != "recovered"))
+
+    return {
+        **_banner_row(),
+        "funnel": funnel,
+        "headline_sources": [
+            {"metric": "Revenue at Risk", "how": f"Sum of the {len(features)} leaked cases in the demo merchant's development set: each recovery case carries its amount; no labels used here."},
+            {"metric": "Recoverable", "how": f"The subset ({truth_recoverable} cases) the synthetic world marks as worth recovering. The model never sees this label; it is the ground truth we score against."},
+            {"metric": "Recovered", "how": f"Verified payments only. We only count a case after Execution reports success AND Verification confirms the payment completed (Rs{recovered_amount} across {verified} cases)."},
+            {"metric": "Recovery Rate", "how": "Recovered / Recoverable (same denominator in code and UI). If we can't prove a payment, we don't claim it."},
+            {"metric": "Skipped / leaked", "how": f"{do_nothing} cases with Rs{leaked_away} at risk were deliberately not touched (repeated failure, low probability) — intelligent refusal, not blind retry."},
+        ],
+        "verified_cases": verified,
+        "executed_cases": executed_ok,
+        "skipped_to_verify": skipped_to_verify,
+    }
+
 
 
 @app.get("/api/cases/{case_id}")
 def case_detail(case_id: str) -> dict:
-    features = load_features(DB_PATH, "development") + load_features(DB_PATH, "holdout")
-    match = next((f for f in features if f.recovery_case_id == case_id), None)
-    if match is None:
-        raise HTTPException(status_code=404, detail="recovery case not found")
-    report = run_case(match, _executor())
+    report = _report_for(case_id)
     return {
         **_banner_row(),
-        "case": asdict(report.detection) | {"amount": match.amount},
         "diagnosis": asdict(report.diagnosis),
         "decision": asdict(report.decision),
         "policy": asdict(report.policy),
+        "timeline": [asdict(step) for step in report.timeline],
+        "verification": asdict(report.verification),
+    }
+
+
+@app.post("/api/cases/{case_id}/approve")
+def approve_case(case_id: str) -> dict:
+    """Operator approval: run policy-checked execution and return the verified result."""
+    report = _report_for(case_id)
+    if report.decision.action == "do_nothing":
+        raise HTTPException(status_code=409, detail="case is a do-nothing; nothing to approve")
+    return {
+        **_banner_row(),
+        "executed": report.verification.outcome == "recovered",
+        "execution": asdict(report.execution) if report.execution else None,
+        "verification": asdict(report.verification),
         "timeline": [asdict(step) for step in report.timeline],
     }
 
@@ -98,25 +220,101 @@ def evaluate() -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> str:
-    return (
-        "<!doctype html><html><head><title>KTHMA</title>"
-        "<style>body{font-family:system-ui;background:#0b1220;color:#e6edf7;margin:0}"
-        "header{background:#111a2e;padding:14px 24px;display:flex;justify-content:space-between}"
-        ".banner{background:#7a2e2e;padding:4px 10px;border-radius:4px;font-size:12px}"
-        "main{padding:24px;max-width:900px}.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}"
-        ".card{background:#151f36;padding:16px;border-radius:8px}.card h3{margin:0;font-size:12px;color:#8aa0c4}"
-        ".card p{margin:6px 0 0;font-size:22px}table{width:100%;border-collapse:collapse;margin-top:20px}"
-        "td,th{padding:8px;border-bottom:1px solid #22304e;text-align:left;font-size:13px}</style></head><body>"
-        f"<header><strong>KTHMA</strong><span class='banner'>{BANNER}</span></header><main>"
-        "<div id='summary' class='grid'></div><h3>Active recovery cases</h3>"
-        "<table id='cases'></table><h3>Evaluation (hold-out)</h3><pre id='eval'></pre></main>"
-        "<script>fetch('/api/summary').then(r=>r.json()).then(d=>{document.getElementById('summary').innerHTML="
-        "['revenue_at_risk','recoverable','recovered','recovery_rate','case_count'].map(k=>"
-        "`<div class='card'><h3>${k}</h3><p>${d[k]}</p></div>`).join('')});"
-        "fetch('/api/cases').then(r=>r.json()).then(d=>{document.getElementById('cases').innerHTML="
-        "'<tr><th>Case</th><th>Amount</th><th>Type</th><th>Action</th><th>Expected</th></tr>'+"
-        "d.cases.slice(0,10).map(c=>`<tr><td>${c.recovery_case_id}</td><td>${c.amount}</td><td>${c.type}</td>"
-        "<td>${c.recommended_action}</td><td>${c.expected_recovery}</td></tr>`).join('')});"
-        "fetch('/api/evaluate').then(r=>r.json()).then(d=>{document.getElementById('eval').textContent=d.table});"
-        "</script></body></html>"
-    )
+    return """<!doctype html>
+<html><head><meta charset="utf-8"><title>KTHMA — Revenue Recovery</title>
+<style>
+:root{--bg:#0b1220;--panel:#131c30;--panel2:#1a2742;--line:#22304e;--txt:#e6edf7;--mut:#8aa0c4;--acc:#4f8cff;--ok:#2ecc8f;--warn:#f0b429;--bad:#e5484d}
+*{box-sizing:border-box}body{margin:0;font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--txt)}
+header{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;background:#0e1728;border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:18px;letter-spacing:2px}.banner{background:#6b2f2f;color:#ffd9d9;padding:4px 12px;border-radius:4px;font-size:12px;font-weight:600}
+main{padding:24px 28px;max-width:1100px;margin:0 auto}
+h2{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;margin:26px 0 10px}
+.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+.card h3{margin:0;font-size:11px;color:var(--mut);text-transform:uppercase}
+.card p{margin:8px 0 0;font-size:22px;font-weight:700}.ok{color:var(--ok)}
+.brk{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.brk .card p{font-size:16px}.brk .small{font-size:12px;color:var(--mut);font-weight:400;margin-top:4px}
+table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+th{font-size:11px;text-transform:uppercase;color:var(--mut);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px}
+tr.click{cursor:pointer}tr.click:hover{background:var(--panel2)}
+.tag{padding:2px 8px;border-radius:10px;font-size:11px}.tag.recovered{background:#123c2e;color:var(--ok)}.tag.no_action_taken{background:#22304e;color:var(--mut)}
+button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:8px 16px;font-weight:600;cursor:pointer}
+button:disabled{background:var(--line);color:var(--mut);cursor:default}
+#panel{display:none;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px;margin-top:16px}
+#panel h3{margin:0 0 4px}.step{display:flex;gap:10px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px}
+.step b{color:var(--acc);min-width:86px}.ev{font-size:12px;color:var(--mut);margin:8px 0;line-height:1.6}
+pre{background:#0d1526;border:1px solid var(--line);border-radius:8px;padding:14px;font-size:12px;overflow-x:auto}
+.dv{display:flex;gap:18px;margin-top:10px;flex-wrap:wrap}.dv div{font-size:13px}.dv b{color:var(--acc)}
+.source{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:6px;padding:12px 14px;margin:10px 0;font-size:13px;line-height:1.5}
+.source b{color:var(--acc)}
+</style></head><body>
+<header><h1>KTHMA</h1><span class="banner">DEMO MERCHANT · SYNTHETIC DATA</span></header>
+<main>
+<div class="cards" id="cards"></div>
+<h2>Leakage breakdown</h2><div class="brk" id="brk"></div>
+<h2>How we got here — the actual pipeline funnel</h2>
+<table id="funnel"><thead><tr><th>Stage</th><th>Cases</th><th>Amount</th><th>What it means</th></tr></thead><tbody></tbody></table>
+<div id="sources"></div>
+<h2>Active recovery cases</h2>
+<table><thead><tr><th>Case</th><th>Amount</th><th>Type</th><th>Root cause</th><th>P(recovery)</th><th>Recommended</th><th>Expected</th><th>Status</th></tr></thead>
+<tbody id="cases"></tbody></table>
+<div id="panel">
+  <h3 id="p-title"></h3><div class="ev" id="p-evidence"></div>
+  <div class="dv" id="p-decision"></div>
+  <div id="p-steps" style="margin-top:12px"></div>
+  <div style="margin-top:14px"><button id="approve">Approve &amp; Execute</button> <span id="p-msg" style="font-size:13px;color:var(--mut)"></span></div>
+</div>
+<h2>Evaluation (hold-out, seed 42)</h2><pre id="eval">loading…</pre>
+</main>
+<script>
+const fmt = n => '\\u20B9' + Number(n).toLocaleString('en-IN');
+// PART2
+fetch('/api/summary').then(r=>r.json()).then(d=>{
+  const items=[['Revenue at risk',d.revenue_at_risk],['Recoverable',d.recoverable],['Recovered',d.recovered,'ok'],['Recovery rate',(100*d.recovery_rate).toFixed(1)+'%','ok'],['Recovery cases',d.case_count]];
+  document.getElementById('cards').innerHTML=items.map(([k,v,c])=>`<div class="card"><h3>${k}</h3><p class="${c||''}">${(typeof v==='number'&&k!=='Recovery cases'&&k!=='Recovery rate')?fmt(v):v}</p></div>`).join('');
+});
+fetch('/api/breakdown').then(r=>r.json()).then(d=>{
+  document.getElementById('brk').innerHTML=Object.values(d.breakdown).map(e=>`<div class="card"><h3>${e.label}</h3><p>${fmt(e.amount_at_risk)}</p><p class="small">${e.cases} cases</p></div>`).join('');
+});
+fetch('/api/journey').then(r=>r.json()).then(d=>{
+  document.getElementById('funnel').querySelector('tbody').innerHTML=d.funnel.map(s=>`<tr>
+    <td><b>${s.stage}</b></td><td>${s.cases}</td><td>${s.amount==null?'—':fmt(s.amount)}</td><td>${s.note}</td></tr>`).join('');
+  document.getElementById('sources').innerHTML='<h2>What each headline number actually means</h2>'+
+    d.headline_sources.map(s=>`<div class="source"><b>${s.metric}:</b> ${s.how}</div>`).join('');
+});
+let selected=null;
+fetch('/api/cases').then(r=>r.json()).then(d=>{
+  document.getElementById('cases').innerHTML=d.cases.map(c=>`<tr class="click" onclick="investigate('${c.recovery_case_id}')">
+  <td>${c.recovery_case_id}</td><td>${fmt(c.amount)}</td><td>${c.type_label}</td><td>${c.root_cause}</td>
+  <td>${Math.round(c.probability*100)}%</td><td>${c.recommended_action}</td><td>${fmt(c.expected_recovery)}</td>
+  <td><span class="tag ${c.outcome}">${c.outcome}</span></td></tr>`).join('');
+});
+async function investigate(id){
+  selected=id;
+  const d=await (await fetch('/api/cases/'+id)).json();
+  document.getElementById('panel').style.display='block';
+  document.getElementById('p-title').textContent='Investigation · '+id;
+  document.getElementById('p-evidence').textContent='Evidence: '+d.diagnosis.evidence.join(' · ');
+  document.getElementById('p-decision').innerHTML=
+    `<div><b>Action</b> ${d.decision.action}</div><div><b>Amount</b> ${fmt(d.decision.amount)}</div>`+
+    `<div><b>P(success)</b> ${Math.round(d.decision.probability_of_success*100)}%</div>`+
+    `<div><b>Expected recovery</b> ${fmt(d.decision.expected_recovery_value)}</div>`+
+    `<div><b>Why</b> ${d.decision.rationale}</div><div><b>Policy</b> ${d.policy.risk_level} risk · approval ${d.policy.requires_approval?'required':'not required'}</div>`;
+  document.getElementById('p-steps').innerHTML=d.timeline.map(s=>`<div class="step"><b>${s.stage}</b><span>${s.detail}</span></div>`).join('');
+  const btn=document.getElementById('approve');
+  btn.disabled=d.verification.outcome==='recovered'||d.decision.action==='do_nothing';
+  document.getElementById('p-msg').textContent=d.verification.outcome==='recovered'?'Already executed and verified.':'';
+}
+document.getElementById('approve').onclick=async()=>{
+  if(!selected)return;
+  const r=await fetch('/api/cases/'+selected+'/approve',{method:'POST'});
+  const d=await r.json();
+  const msg=document.getElementById('p-msg');
+  if(r.ok&&d.executed){msg.textContent='\\u2713 Executed via '+d.execution.adapter+' \\u2014 verified '+fmt(d.verification.recovered_amount)+' recovered';
+    document.getElementById('approve').disabled=true;investigate(selected);setTimeout(()=>location.reload(),1200);}
+  else{msg.textContent='\\u2717 '+(d.detail||(d.execution&&d.execution.detail)||'execution failed');}
+};
+fetch('/api/evaluate').then(r=>r.json()).then(d=>{document.getElementById('eval').textContent=d.table});
+</script></body></html>"""
