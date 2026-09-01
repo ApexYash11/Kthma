@@ -170,7 +170,11 @@ def apply_policy(decision: Decision) -> PolicyVerdict:
     return PolicyVerdict(decision.action, "medium", True)
 
 
-def run_case(features: RecoveryCaseFeatures, executor: Executor | None = None) -> CaseReport:
+def run_case(
+    features: RecoveryCaseFeatures,
+    executor: Executor | None = None,
+    policy: RecoveryPolicy | None = None,
+) -> CaseReport:
     executor = executor or SimulatorExecutor()
     timeline: list[TimelineStep] = []
 
@@ -180,14 +184,14 @@ def run_case(features: RecoveryCaseFeatures, executor: Executor | None = None) -
     diagnosis = diagnose(features)
     timeline.append(TimelineStep("DIAGNOSE", f"root cause: {diagnosis.root_cause}"))
 
-    decision = decide(features)
+    decision = decide(features, policy)
     timeline.append(
         TimelineStep("DECIDE", f"action={decision.action} erv=Rs{decision.expected_recovery_value}")
     )
 
-    policy = apply_policy(decision)
+    verdict = apply_policy(decision)
     timeline.append(
-        TimelineStep("POLICY", f"risk={policy.risk_level} requires_approval={policy.requires_approval}")
+        TimelineStep("POLICY", f"risk={verdict.risk_level} requires_approval={verdict.requires_approval}")
     )
 
     execution: ExecutionResult | None = None
@@ -200,7 +204,7 @@ def run_case(features: RecoveryCaseFeatures, executor: Executor | None = None) -
                 recovery_case_id=decision.recovery_case_id,
                 action=decision.action,
                 amount=decision.amount,
-                approved=policy.requires_approval,
+                approved=verdict.requires_approval,
             )
         )
         timeline.append(TimelineStep("ACT", f"adapter={execution.adapter} success={execution.success}"))
@@ -215,7 +219,7 @@ def run_case(features: RecoveryCaseFeatures, executor: Executor | None = None) -
         detection=detection,
         diagnosis=diagnosis,
         decision=decision,
-        policy=policy,
+        policy=verdict,
         execution=execution,
         verification=verification,
         timeline=timeline,

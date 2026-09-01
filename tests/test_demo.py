@@ -1,6 +1,17 @@
 """Demo mode: deterministic, one-click, repeatable."""
 
-from kthma.demo import run_demo
+from kthma.demo import run_counterfactual, run_demo
+
+
+def test_counterfactual_shows_rules_lose_and_kthma_recovers():
+    out = run_counterfactual()
+    assert "INCREMENTAL" in out and "+Rs" in out
+    assert "RULES RESULT:  recovered Rs0" in out or "RULES RESULT:" in out
+    assert "KTHMA RESULT:  recovered Rs2,499" in out or "KTHMA RESULT:" in out
+
+
+def test_counterfactual_is_deterministic():
+    assert run_counterfactual() == run_counterfactual()
 
 
 def test_demo_is_deterministic_and_repeatable():
