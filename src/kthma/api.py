@@ -11,7 +11,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
 from kthma import load_features, load_ground_truth
-from kthma.execution import GroundedSimulatorExecutor, HybridRazorpayExecutor, RazorpayPaymentLinkTransport
+from kthma.execution import (
+    Executor,
+    GroundedSimulatorExecutor,
+    HybridRazorpayExecutor,
+    RazorpayPaymentLinkTransport,
+)
 from kthma.models import RecoveryCaseFeatures
 from kthma.pipeline import CaseReport, run_case
 from kthma.report import format_report, run_evaluation
@@ -52,11 +57,12 @@ def _executor():
     )
 
 
-def _report_for(case_id: str) -> CaseReport:
+def _report_for(case_id: str, executor: Executor | None = None) -> CaseReport:
     match = next((f for f in _all_features() if f.recovery_case_id == case_id), None)
     if match is None:
         raise HTTPException(status_code=404, detail="recovery case not found")
-    return run_case(match, _executor())
+    executor = executor or _executor()
+    return run_case(match, executor)
 
 
 @app.get("/api/summary")
@@ -196,15 +202,32 @@ def case_detail(case_id: str) -> dict:
 
 @app.post("/api/cases/{case_id}/approve")
 def approve_case(case_id: str) -> dict:
-    """Operator approval: run policy-checked execution and return the verified result."""
-    report = _report_for(case_id)
+    """Operator approval: run policy-checked execution and return the verified result.
+
+    On the real Razorpay path a payment link is only reported as recovered after
+    `paid` verification (polling the link status) confirms the payment settled.
+    """
+    executor = _executor()
+    report = _report_for(case_id, executor)
     if report.decision.action == "do_nothing":
         raise HTTPException(status_code=409, detail="case is a do-nothing; nothing to approve")
+    verified: dict | None = None
+    outcome = report.verification.outcome
+    if (
+        report.execution
+        and report.execution.adapter == "RAZORPAY_TEST_MODE"
+        and hasattr(executor, "verify")
+    ):
+        paid, detail = executor.verify(report.execution, case_id)
+        verified = {"paid": paid, "detail": detail}
+        # Only claim recovery after the link is actually paid (fail-closed).
+        outcome = "recovered" if paid else "failed"
     return {
         **_banner_row(),
-        "executed": report.verification.outcome == "recovered",
+        "executed": report.execution is not None and report.execution.success,
         "execution": asdict(report.execution) if report.execution else None,
-        "verification": asdict(report.verification),
+        "verification": {**asdict(report.verification), "outcome": outcome},
+        "verified": verified,
         "timeline": [asdict(step) for step in report.timeline],
     }
 

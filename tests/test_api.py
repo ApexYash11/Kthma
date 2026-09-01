@@ -96,3 +96,38 @@ def test_journey_endpoint_has_funnel_and_headline_sources(client):
 def test_dashboard_html_carries_banner(client):
     html = client.get("/").text
     assert "DEMO MERCHANT · SYNTHETIC DATA" in html
+
+
+def test_razorpay_approve_only_recovers_paid_link(monkeypatch, tmp_path):
+    """On the real Razorpay path a link counts as recovered only after `paid`."""
+    from kthma import api
+    from kthma.execution import HybridRazorpayExecutor
+
+    class FakeTransport:
+        def __init__(self, status):
+            self.status = status
+
+        def request(self, method, path, payload=None):
+            return {"id": "plink_1", "short_url": "https://rzp.io/i/x", "status": self.status}
+
+    db = str(tmp_path / "d.sqlite3")
+    save_split(generate(seed=11, n=60), db)
+    monkeypatch.setattr(api, "DB_PATH", db)
+    client = TestClient(api.app)
+
+    abandon = next(
+        c
+        for c in client.get("/api/cases").json()["cases"]
+        if c["type"] == "checkout_abandonment"
+    )
+    # unpaid link -> approve must NOT claim recovery
+    monkeypatch.setattr(api, "_executor", lambda: HybridRazorpayExecutor(FakeTransport("created")))
+    bad = client.post(f"/api/cases/{abandon['recovery_case_id']}/approve").json()
+    assert bad["verified"]["paid"] is False
+    assert bad["verification"]["outcome"] == "failed"
+
+    # paid link -> approve claims recovery, verified paid True
+    monkeypatch.setattr(api, "_executor", lambda: HybridRazorpayExecutor(FakeTransport("paid")))
+    good = client.post(f"/api/cases/{abandon['recovery_case_id']}/approve").json()
+    assert good["verified"]["paid"] is True
+    assert good["verification"]["outcome"] == "recovered"

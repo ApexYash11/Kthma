@@ -4,6 +4,7 @@ import pytest
 
 from kthma.execution import (
     ExecutionRequest,
+    ExecutionResult,
     HybridRazorpayExecutor,
     RazorpayPaymentLinkTransport,
 )
@@ -80,3 +81,58 @@ def test_real_transport_builds_basic_auth_request():
 
     transport = RazorpayPaymentLinkTransport(key_id="rzp_test_k", key_secret="s")
     assert transport._auth_header() == "Basic " + base64.b64encode(b"rzp_test_k:s").decode()
+
+
+# --- paid verification on the demo path ---
+
+class PaidTransport:
+    def __init__(self, status: str = "paid"):
+        self.status = status
+        self.calls = []
+
+    def request(self, method: str, path: str, payload: dict) -> dict:
+        self.calls.append((method, path, payload))
+        return {"id": "plink_123", "short_url": "https://rzp.io/i/abc", "status": self.status}
+
+
+def test_verify_marks_a_paid_link_recovered():
+    executor = HybridRazorpayExecutor(transport=PaidTransport(status="paid"))
+    executed = executor.execute(ExecutionRequest("rc_1", "payment_link", 2499, approved=True))
+    ok, detail = executor.verify(executed, "rc_1")
+    assert ok is True
+    assert "paid" in detail
+    # verification polls the created link by id
+    method, path, _ = executor.transport.calls[-1]
+    assert (method, path) == ("GET", "/v1/payment_links/plink_123")
+
+
+def test_verify_does_not_confirm_a_not_paid_link():
+    executor = HybridRazorpayExecutor(transport=PaidTransport(status="created"))
+    executed = executor.execute(ExecutionRequest("rc_1", "payment_link", 2499, approved=True))
+    ok, detail = executor.verify(executed, "rc_1")
+    assert ok is False
+    assert "created" in detail
+
+
+def test_verify_fails_closed_on_the_simulator_path():
+    executor = HybridRazorpayExecutor(transport=PaidTransport())
+    simulated = ExecutionResult(
+        success=True, adapter="SIMULATOR", detail="simulated execution succeeded"
+    )
+    ok, detail = executor.verify(simulated, "rc_1")
+    assert ok is False
+    assert "simulator" in detail or "Test Mode" in detail
+
+
+def test_verify_surfaces_transport_error_not_crash():
+    class PollFailTransport:
+        def request(self, method, path, payload):
+            if method == "GET":
+                raise RuntimeError("razorpay 500: upstream down")
+            return {"id": "plink_123", "status": "created"}
+
+    executor = HybridRazorpayExecutor(transport=PollFailTransport())
+    executed = executor.execute(ExecutionRequest("rc_1", "payment_link", 2499, approved=True))
+    ok, detail = executor.verify(executed, "rc_1")
+    assert ok is False
+    assert "500" in detail
