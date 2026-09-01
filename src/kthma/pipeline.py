@@ -9,6 +9,15 @@ from kthma.models import RecoveryCaseFeatures
 from kthma.recovery_model import RecoveryPolicy, recovery_value
 
 MONEY_MOVING = frozenset({"retry_payment", "retry_subscription", "payment_link"})
+# AGENTS.md policy tiers, made concrete:
+#   LOW    -> auto-execute (audit-only / refusal / no money moves)
+#   MEDIUM -> require operator approval
+#   HIGH   -> require explicit approval (large money-moving action)
+#   blocked -> hard cap exceeded: never execute, even with approval
+AUTO_ACTIONS = frozenset({"do_nothing", "escalate", "reminder", "alternate_method"})
+MEDIUM_AMOUNT_CAP = 10_000   # at/below: money-moving is medium risk
+HIGH_AMOUNT_CAP = 50_000     # above: money-moving is high risk (explicit approval)
+BLOCK_AMOUNT_CAP = 100_000   # above: refuse to act at all
 
 
 @dataclass(frozen=True)
@@ -40,6 +49,7 @@ class PolicyVerdict:
     action: str
     risk_level: str
     requires_approval: bool
+    blocked: bool = False
 
 
 @dataclass(frozen=True)
@@ -163,10 +173,17 @@ def decide(
 
 
 def apply_policy(decision: Decision) -> PolicyVerdict:
-    if decision.action == "do_nothing":
+    # Audit-only / refusal actions auto-execute (they move no money).
+    if decision.action in AUTO_ACTIONS:
         return PolicyVerdict(decision.action, "low", False)
-    if decision.action in MONEY_MOVING:
+    # Unknown intervention that isn't a recognized money mover -> approval.
+    if decision.action not in MONEY_MOVING:
         return PolicyVerdict(decision.action, "medium", True)
+    # Money-moving: respect the amount caps (safety / Rs cap, AGENTS.md).
+    if decision.amount > BLOCK_AMOUNT_CAP:
+        return PolicyVerdict(decision.action, "blocked", False, blocked=True)
+    if decision.amount > HIGH_AMOUNT_CAP:
+        return PolicyVerdict(decision.action, "high", True)
     return PolicyVerdict(decision.action, "medium", True)
 
 
@@ -195,9 +212,14 @@ def run_case(
     )
 
     execution: ExecutionResult | None = None
-    if decision.action == "do_nothing":
+    if decision.action == "do_nothing" or verdict.blocked:
+        note = (
+            "no action taken; case closed without intervention"
+            if not verdict.blocked
+            else f"action blocked by policy: {verdict.risk_level} risk exceeds safe limit"
+        )
         verification = Verification("no_action_taken", 0)
-        timeline.append(TimelineStep("VERIFY", "no action taken; case closed without intervention"))
+        timeline.append(TimelineStep("VERIFY", note))
     else:
         execution = executor.execute(
             ExecutionRequest(
