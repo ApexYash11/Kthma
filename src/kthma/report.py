@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from kthma.baselines import AlwaysRetryBaseline, MLOnlyBaseline, RuleBasedBaseline
 from kthma.evaluation import Metrics, Prediction, score
-from kthma.models import SplitDataset
+from kthma.models import Split, SplitDataset
 from kthma.pipeline import decide
 from kthma.recovery_model import fit_policy
 
@@ -59,6 +59,48 @@ def run_evaluation(dataset: SplitDataset) -> EvaluationReport:
 def incremental_vs(report: EvaluationReport, method: str) -> float:
     """Additional money KTHMA recovered over a baseline."""
     return report.methods["KTHMA"].revenue_recovered - report.methods[method].revenue_recovered
+
+
+def learning_loop(
+    dataset: SplitDataset,
+    train_sizes: tuple[float, ...] = (0.25, 0.5, 1.0),
+    seed: int = 42,
+) -> list[dict]:
+    """KTHMA improves with feedback.
+
+    The working learning loop: the policy is fit on an increasing fraction of
+    development outcomes (as if recovery outcomes were logged and fed back),
+    and scored on the untouched hold-out each time. The last row is the same
+    model `run_evaluation` uses; the curve shows re-training from outcomes
+    visibly lifts hold-out performance.
+    """
+    dev_features = list(dataset.development.features)
+    dev_truth = list(dataset.development.ground_truth)
+    n = len(dev_features)
+    results: list[dict] = []
+    for frac in train_sizes:
+        k = max(20, int(round(n * frac)))
+        k = min(k, n)
+        split = Split(features=tuple(dev_features[:k]), ground_truth=tuple(dev_truth[:k]))
+        policy = fit_policy(split, seed=seed)
+        predictions = [
+            Prediction(
+                recovery_case_id=f.recovery_case_id,
+                recoverable=decide(f, policy).action != "do_nothing",
+                action=decide(f, policy).action,
+            )
+            for f in dataset.holdout.features
+        ]
+        m = score(predictions, dataset.holdout.ground_truth)
+        results.append(
+            {
+                "n_train": k,
+                "action_accuracy": m.action_accuracy,
+                "revenue_recovered": m.revenue_recovered,
+                "false_intervention_rate": m.false_intervention_rate,
+            }
+        )
+    return results
 
 
 def format_report(report: EvaluationReport) -> str:

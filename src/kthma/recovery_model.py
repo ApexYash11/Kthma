@@ -9,6 +9,8 @@ bank_timeout + card -> retry wins) that a linear rule table can't, and
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 
@@ -61,8 +63,9 @@ def fit_policy(development: Split, seed: int = 42) -> RecoveryPolicy:
     """Train on development ground truth (labels never reach prediction)."""
     X = _matrix(development.features)
     y = [g.best_action for g in development.ground_truth]
+    n_estimators = int(os.environ.get("KTHMA_N_ESTIMATORS", "200"))
     model = RandomForestClassifier(
-        n_estimators=200,
+        n_estimators=n_estimators,
         random_state=seed,
         n_jobs=1,
     )
