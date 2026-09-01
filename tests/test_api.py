@@ -98,6 +98,20 @@ def test_dashboard_html_carries_banner(client):
     assert "DEMO MERCHANT · SYNTHETIC DATA" in html
 
 
+def test_dashboard_html_leads_with_counterfactual_hero(client):
+    html = client.get("/").text
+    assert "Why KTHMA beats a rules engine" in html
+    assert "cf-row" in html
+
+
+def test_counterfactual_endpoint_reports_incremental_vs_rules(client):
+    data = client.get("/api/counterfactual").json()
+    assert data["kthma_recovered"] >= 0
+    assert data["incremental_vs_rules"] > 0  # KTHMA makes more money than rules
+    assert data["incremental_vs_always_retry"] > 0
+    assert data["wrong_actions"]["kthma"] < data["wrong_actions"]["always_retry"]
+
+
 def test_razorpay_approve_only_recovers_paid_link(monkeypatch, tmp_path):
     """On the real Razorpay path a link counts as recovered only after `paid`."""
     from kthma import api
