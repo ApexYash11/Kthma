@@ -57,7 +57,9 @@ def run_demo(seed: int = 42) -> str:
     total_at_risk = 0
     total_recovered = 0
     for title, features in scenarios:
-        report = run_case(features, executor)
+        # The demo showcases the full operator-in-the-loop flow: the operator
+        # reviews the plan and approves execution (approved=True).
+        report = run_case(features, executor, approved=True)
         total_at_risk += report.detection.revenue_at_risk
         total_recovered += report.verification.recovered_amount
         lines.append(f"{title}: Rs{report.detection.revenue_at_risk} at risk")
@@ -101,8 +103,8 @@ def run_counterfactual(seed: int = 42) -> str:
     case = _pick_counterfactual(dataset, world)
     rules = RuleBasedBaseline()
     _ = rules.predict(case)  # rule decision shown in the report timeline
-    rules_report = run_case(case, executor)  # rule default (no policy)
-    kthma_report = run_case(case, executor, policy)
+    rules_report = run_case(case, executor, approved=True)  # rule default (no policy)
+    kthma_report = run_case(case, executor, policy, approved=True)
 
     lines = [
         "KTHMA COUNTERFACTUAL · DEMO MERCHANT · SYNTHETIC DATA",

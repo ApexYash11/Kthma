@@ -97,3 +97,82 @@ def test_blocked_action_renders_no_execution_in_run_case() -> None:
         ExecutionRequest(f.recovery_case_id, report.decision.action, f.amount, approved=False)
     )
     assert "blocked" in executed.detail
+
+
+def test_medium_risk_case_is_not_executed_without_approval() -> None:
+    """A medium-risk money-moving action must NOT execute when approved=False.
+
+    This is the core safety gate the panel flagged: run_case defaults
+    approved=False, so forgetting to pass approval never executes."""
+    from kthma.pipeline import run_case
+
+    f = RecoveryCaseFeatures(
+        recovery_case_id="rc_med",
+        leakage_type="payment_failure",
+        amount=2499,
+        currency="INR",
+        payment_method="card",
+        failure_reason="bank_timeout",
+        attempt_count=1,
+        last_attempt_at="2026-06-01T09:00:00",
+        customer_id="cust_1",
+        prior_successful_payments=5,
+        prior_failures=0,
+        days_since_last_success=2,
+        subscription_flag=False,
+        checkout_entered_flag=False,
+    )
+    report = run_case(f, SimulatorExecutor(), approved=False)
+    assert report.policy.requires_approval is True
+    assert report.verification.outcome == "pending_approval"
+    assert report.execution is None  # nothing was executed
+
+
+def test_medium_risk_case_executes_only_when_approved() -> None:
+    """When approved=True, the same medium-risk action executes."""
+    from kthma.pipeline import run_case
+
+    f = RecoveryCaseFeatures(
+        recovery_case_id="rc_med_ok",
+        leakage_type="payment_failure",
+        amount=2499,
+        currency="INR",
+        payment_method="card",
+        failure_reason="bank_timeout",
+        attempt_count=1,
+        last_attempt_at="2026-06-01T09:00:00",
+        customer_id="cust_1",
+        prior_successful_payments=5,
+        prior_failures=0,
+        days_since_last_success=2,
+        subscription_flag=False,
+        checkout_entered_flag=False,
+    )
+    report = run_case(f, SimulatorExecutor(), approved=True)
+    assert report.policy.requires_approval is True
+    assert report.execution is not None  # executed because approved
+
+
+def test_plan_case_never_executes() -> None:
+    """plan_case must never run an executor, regardless of risk level."""
+    from kthma.pipeline import plan_case
+
+    f = RecoveryCaseFeatures(
+        recovery_case_id="rc_plan",
+        leakage_type="payment_failure",
+        amount=2499,
+        currency="INR",
+        payment_method="card",
+        failure_reason="bank_timeout",
+        attempt_count=1,
+        last_attempt_at="2026-06-01T09:00:00",
+        customer_id="cust_1",
+        prior_successful_payments=5,
+        prior_failures=0,
+        days_since_last_success=2,
+        subscription_flag=False,
+        checkout_entered_flag=False,
+    )
+    report = plan_case(f)
+    assert report.execution is None
+    assert report.verification.outcome == "pending_approval"

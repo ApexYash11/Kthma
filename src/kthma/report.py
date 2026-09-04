@@ -104,12 +104,15 @@ def learning_loop(
 
 
 def format_report(report: EvaluationReport) -> str:
-    header = f"{'METHOD':<16}{'RECOVERY':>12}{'WRONG ACTIONS':>16}{'ACTION ACC':>12}"
+    header = f"{'METHOD':<16}{'RECOVERY':>14}{'WRONG ACTIONS':>16}{'ACTION ACC':>12}"
     lines = [header]
     for name, m in report.methods.items():
-        wrong_actions = round(m.false_intervention_rate * m.total_cases)
+        # True wrong actions: false interventions (acted when should not have)
+        # plus misses (did not act when should have). This is total_cases minus
+        # correct decisions, not a rate multiplied by total.
+        wrong_actions = m.total_cases - round(m.action_accuracy * m.total_cases)
         lines.append(
-            f"{name:<16}{'Rs' + format(m.revenue_recovered, ','):>12}{wrong_actions:>16}{m.action_accuracy:>12.3f}"
+            f"{name:<16}{'Rs' + format(m.revenue_recovered, ','):>14}{wrong_actions:>16}{m.action_accuracy:>12.3f}"
         )
     lines.append("")
     lines.append(f"INCREMENTAL (KTHMA vs Rule Based): +Rs{format(incremental_vs(report, 'Rule Based'), ',')}")

@@ -96,12 +96,12 @@ def diagnose(features: RecoveryCaseFeatures) -> Diagnosis:
         cause, confidence = "repeated_failed_attempts_low_recovery_probability", 0.9
     elif features.leakage_type == "checkout_abandonment":
         cause, confidence = "customer_entered_payment_flow_then_abandoned", 0.85
+    elif features.leakage_type == "subscription_failure":
+        cause, confidence = "mandate_debit_declined_with_payment_history", 0.75
     elif features.failure_reason == "bank_timeout":
         cause, confidence = "bank_timeout_high_purchase_intent", 0.8
     elif features.failure_reason == "insufficient_funds":
         cause, confidence = "insufficient_funds_temporary", 0.6
-    elif features.leakage_type == "subscription_failure":
-        cause, confidence = "mandate_debit_declined_with_payment_history", 0.75
     else:
         cause, confidence = "payment_failed", 0.5
     return Diagnosis(root_cause=cause, confidence=confidence, evidence=evidence)
@@ -187,11 +187,78 @@ def apply_policy(decision: Decision) -> PolicyVerdict:
     return PolicyVerdict(decision.action, "medium", True)
 
 
+def plan_case(
+    features: RecoveryCaseFeatures,
+    policy: RecoveryPolicy | None = None,
+) -> CaseReport:
+    """Plan a recovery case without executing any money-moving action.
+
+    Used by GET endpoints and the dashboard case list so that no action is
+    ever performed until an operator explicitly approves it via POST /approve.
+    The pipeline runs through POLICY; execution is left as None and the
+    verification outcome is ``pending_approval`` when the action requires it.
+    """
+    timeline: list[TimelineStep] = []
+
+    detection = detect(features)
+    timeline.append(TimelineStep("DETECT", f"leakage detected: {detection.leakage_type}"))
+
+    diagnosis = diagnose(features)
+    timeline.append(TimelineStep("DIAGNOSE", f"root cause: {diagnosis.root_cause}"))
+
+    decision = decide(features, policy)
+    timeline.append(
+        TimelineStep("DECIDE", f"action={decision.action} erv=Rs{decision.expected_recovery_value}")
+    )
+
+    verdict = apply_policy(decision)
+    timeline.append(
+        TimelineStep("POLICY", f"risk={verdict.risk_level} requires_approval={verdict.requires_approval}")
+    )
+
+    if decision.action == "do_nothing" or verdict.blocked:
+        note = (
+            "no action taken; case closed without intervention"
+            if not verdict.blocked
+            else f"action blocked by policy: {verdict.risk_level} risk exceeds safe limit"
+        )
+        verification = Verification("no_action_taken", 0)
+        timeline.append(TimelineStep("VERIFY", note))
+    elif verdict.requires_approval:
+        verification = Verification("pending_approval", 0)
+        timeline.append(TimelineStep("VERIFY", "awaiting operator approval before execution"))
+    else:
+        # Low-risk auto-execute action (reminder / escalate / alternate_method):
+        # these move no money, so planning is also the final state.
+        verification = Verification("auto_planned", 0)
+        timeline.append(TimelineStep("VERIFY", "low-risk action; no execution on read path"))
+
+    return CaseReport(
+        detection=detection,
+        diagnosis=diagnosis,
+        decision=decision,
+        policy=verdict,
+        execution=None,
+        verification=verification,
+        timeline=timeline,
+    )
+
+
 def run_case(
     features: RecoveryCaseFeatures,
     executor: Executor | None = None,
     policy: RecoveryPolicy | None = None,
+    approved: bool = False,
 ) -> CaseReport:
+    """Run a recovery case end-to-end, optionally executing the action.
+
+    Parameters
+    ----------
+    approved:
+        Whether an operator has explicitly approved money-moving actions.
+        Defaults to ``False`` so that forgetting to pass it never executes.
+        Only ``POST /approve`` passes ``True``.
+    """
     executor = executor or SimulatorExecutor()
     timeline: list[TimelineStep] = []
 
@@ -220,13 +287,19 @@ def run_case(
         )
         verification = Verification("no_action_taken", 0)
         timeline.append(TimelineStep("VERIFY", note))
+    elif verdict.requires_approval and not approved:
+        # Money-moving action that needs operator approval but was not approved.
+        # Do not execute. This is the gate.
+        verification = Verification("pending_approval", 0)
+        timeline.append(TimelineStep("VERIFY", "awaiting operator approval before execution"))
     else:
+        # Either the action is low-risk (auto) or the operator approved it.
         execution = executor.execute(
             ExecutionRequest(
                 recovery_case_id=decision.recovery_case_id,
                 action=decision.action,
                 amount=decision.amount,
-                approved=verdict.requires_approval,
+                approved=True,
             )
         )
         timeline.append(TimelineStep("ACT", f"adapter={execution.adapter} success={execution.success}"))

@@ -1,26 +1,38 @@
-"""Dashboard API: summary, cases, investigation, evaluation. Data from SQLite."""
+"""Dashboard API: summary, cases, investigation, evaluation. Data from SQLite.
+
+Safety contract:
+- GET endpoints only PLAN cases (they never execute money-moving actions).
+- Execution happens only via POST /approve, which persists an audit row.
+- The same learned policy powers the hero, the cards, the funnel and the case list.
+"""
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import asdict
-from functools import lru_cache
-
 import os
+from datetime import datetime, timezone
+from functools import lru_cache
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
 from kthma import load_features, load_ground_truth
 from kthma.execution import (
-    Executor,
     GroundedSimulatorExecutor,
     HybridRazorpayExecutor,
     RazorpayPaymentLinkTransport,
 )
-from kthma.models import RecoveryCaseFeatures
-from kthma.pipeline import CaseReport, run_case
+from kthma import generate
+from kthma.models import RecoveryCaseFeatures, SplitDataset
+from kthma.pipeline import CaseReport, plan_case, run_case
+from kthma.recovery_model import RecoveryPolicy, fit_policy
 from kthma.report import format_report, run_evaluation
+from kthma.store import (
+    ExecutionRecord,
+    load_all_executions,
+    load_execution,
+    save_execution,
+)
 
 app = FastAPI(title="KTHMA", version="0.1.0")
 DB_PATH = "dataset.sqlite3"
@@ -34,53 +46,92 @@ LEAKAGE_LABELS = {
     "repeated_failure": "Repeated failure (do nothing)",
 }
 
+# ---------------------------------------------------------------------------
+# Cached singletons: one policy, one dataset, one truth table for the process.
+# The learned policy is fit once on the development split and reused for every
+# endpoint so the hero, cards, funnel and case table all tell one story.
+# ---------------------------------------------------------------------------
+_policy: RecoveryPolicy | None = None
+_dataset: SplitDataset | None = None
+_all_truth_map: dict[str, tuple[bool, str]] | None = None
 
-def _banner_row() -> dict:
-    return {"banner": BANNER}
+
+def _get_policy() -> RecoveryPolicy:
+    global _policy
+    if _policy is None:
+        _policy = fit_policy(_get_dataset().development, seed=42)
+    return _policy
+
+
+def _get_dataset() -> SplitDataset:
+    global _dataset
+    if _dataset is None:
+        _dataset = generate(seed=42, n=5000)
+    return _dataset
+
+
+def _get_truth_map() -> dict[str, tuple[bool, str]]:
+    global _all_truth_map
+    if _all_truth_map is None:
+        truth = load_ground_truth(DB_PATH, "development") + load_ground_truth(DB_PATH, "holdout")
+        _all_truth_map = {g.recovery_case_id: (g.recoverable, g.best_action) for g in truth}
+    return _all_truth_map
 
 
 def _all_features() -> tuple[RecoveryCaseFeatures, ...]:
     return load_features(DB_PATH, "development") + load_features(DB_PATH, "holdout")
 
 
-def _all_truth():
-    return load_ground_truth(DB_PATH, "development") + load_ground_truth(DB_PATH, "holdout")
-
-
 def _executor():
+    """Build the executor for the approve path. Razorpay only with keys."""
     if os.environ.get("KTHMA_EXECUTOR") == "razorpay":
         transport = RazorpayPaymentLinkTransport(
             key_id=os.environ["RAZORPAY_KEY_ID"], key_secret=os.environ["RAZORPAY_KEY_SECRET"]
         )
         return HybridRazorpayExecutor(transport)
-    return GroundedSimulatorExecutor(
-        {g.recovery_case_id: (g.recoverable, g.best_action) for g in _all_truth()}
-    )
+    return GroundedSimulatorExecutor(_get_truth_map())
 
 
-def _report_for(case_id: str, executor: Executor | None = None) -> CaseReport:
+def _banner_row() -> dict:
+    return {"banner": BANNER}
+
+
+def _get_or_execute(case_id: str) -> CaseReport:
+    """Return a cached execution if the case was already approved, else plan it.
+
+    This makes approve idempotent: a second approve returns the stored result
+    without running the action again.
+    """
+    existing = load_execution(DB_PATH, case_id)
+    if existing is not None:
+        # Rebuild a CaseReport from the persisted execution for the timeline.
+        match = next((f for f in _all_features() if f.recovery_case_id == case_id), None)
+        if match is None:
+            raise HTTPException(status_code=404, detail="recovery case not found")
+        report = plan_case(match, _get_policy())
+        return report
     match = next((f for f in _all_features() if f.recovery_case_id == case_id), None)
     if match is None:
         raise HTTPException(status_code=404, detail="recovery case not found")
-    executor = executor or _executor()
-    return run_case(match, executor)
+    return plan_case(match, _get_policy())
 
 
 @app.get("/api/summary")
 def summary() -> dict:
+    """Headline metrics. 'recovered' counts only operator-approved executions
+    that were verified, never simulated recoveries from a page load."""
     features = load_features(DB_PATH, "development")
     truth = load_ground_truth(DB_PATH, "development")
     at_risk = sum(f.amount for f in features)
     recoverable = sum(g.amount for g in truth if g.recoverable)
-    executor = _executor()
-    recovered = 0
-    for f in features:
-        report = run_case(f, executor)
-        if report.verification.outcome == "recovered":
-            recovered += report.verification.recovered_amount
+
+    # Recovered = sum of verified, approved executions from the audit trail.
+    executions = load_all_executions(DB_PATH)
+    recovered = sum(
+        e.recovered_amount for e in executions.values() if e.verification_outcome == "recovered"
+    )
     return {
         **_banner_row(),
-        "revenue_processed": 12_450_000,  # demo-merchant top line, synthetic
         "revenue_at_risk": at_risk,
         "recoverable": recoverable,
         "recovered": recovered,
@@ -91,10 +142,16 @@ def summary() -> dict:
 
 @app.get("/api/cases")
 def cases() -> dict:
+    """List all recovery cases with their planned (not executed) state.
+
+    No money-moving action runs on this endpoint. The case list shows what
+    KTHMA recommends; execution happens only via POST /approve.
+    """
     features = load_features(DB_PATH, "development")
+    policy = _get_policy()
     items = []
     for f in features:
-        report = run_case(f, _executor())
+        report = plan_case(f, policy)
         items.append(
             {
                 "recovery_case_id": f.recovery_case_id,
@@ -128,48 +185,50 @@ def breakdown() -> dict:
 @app.get("/api/journey")
 def journey() -> dict:
     """Reconstruct, from the actual data, how KTHMA got to the recovered number:
-    the pipeline funnel and the headline leak contributors."""
+    the pipeline funnel and the headline leak contributors.
+
+    The funnel shows planned state (no execution on GET). Recovered counts
+    come from the persisted audit trail — only operator-approved executions.
+    """
     features = load_features(DB_PATH, "development")
     truth = {g.recovery_case_id: g for g in load_ground_truth(DB_PATH, "development")}
-    executor = _executor()
+    policy = _get_policy()
 
     detected = 0
     diagnosed = 0
     recommended = 0
-    approved = 0
-    executed_ok = 0
-    verified = 0
-    recovered_amount = 0
+    requires_approval = 0
     do_nothing = 0
     leaked_away = 0
 
     for f in features:
-        report = run_case(f, executor)
+        report = plan_case(f, policy)
         detected += report.detection.revenue_at_risk
         diagnosed += 1
         if report.decision.action != "do_nothing":
             recommended += 1
-            approved += 1  # medium-risk -> operator approval granted in demo
-            if report.execution and report.execution.success:
-                executed_ok += 1
-                if report.verification.outcome == "recovered":
-                    verified += 1
-                    recovered_amount += report.verification.recovered_amount
+            if report.policy.requires_approval:
+                requires_approval += 1
         else:
             do_nothing += 1
             leaked_away += report.detection.revenue_at_risk
+
+    # Recovered/verified come from the audit trail (operator-approved only).
+    executions = load_all_executions(DB_PATH)
+    executed_ok = sum(1 for e in executions.values() if e.success)
+    verified = sum(1 for e in executions.values() if e.verification_outcome == "recovered")
+    recovered_amount = sum(e.recovered_amount for e in executions.values() if e.verification_outcome == "recovered")
 
     truth_recoverable = sum(1 for g in truth.values() if g.recoverable)
     funnel = [
         {"stage": "Detected (revenue at risk)", "cases": len(features), "amount": detected, "note": "Every leaked payment/abandonment/failed subscription in the dataset"},
         {"stage": "Diagnosed (root cause known)", "cases": diagnosed, "amount": detected, "note": "Cause + confidence + evidence named for each case"},
         {"stage": "Recommended an action", "cases": recommended, "amount": None, "note": "payment link / retry / reminder chosen by expected recovery value"},
-        {"stage": "Approved by policy", "cases": approved, "amount": None, "note": "money-moving actions require operator approval"},
-        {"stage": "Executed", "cases": executed_ok, "amount": None, "note": "via Simulator (or Razorpay Test Mode when keys are set)"},
-        {"stage": "Verified recovered", "cases": verified, "amount": recovered_amount, "note": "payment actually completed — this is the headline Rs recovered"},
+        {"stage": "Requires operator approval", "cases": requires_approval, "amount": None, "note": "money-moving actions wait for the operator to approve"},
         {"stage": "Skipped (do nothing)", "cases": do_nothing, "amount": leaked_away, "note": "intelligent refusal: repeated failures, low recovery probability"},
+        {"stage": "Executed", "cases": executed_ok, "amount": None, "note": "via Simulator (or Razorpay Test Mode when keys are set)"},
+        {"stage": "Verified recovered", "cases": verified, "amount": recovered_amount, "note": "operator-approved execution confirmed — this is the headline Rs recovered"},
     ]
-    skipped_to_verify = round(sum(f.amount for f in features if run_case(f, executor).verification.outcome != "recovered"))
 
     return {
         **_banner_row(),
@@ -177,43 +236,94 @@ def journey() -> dict:
         "headline_sources": [
             {"metric": "Revenue at Risk", "how": f"Sum of the {len(features)} leaked cases in the demo merchant's development set: each recovery case carries its amount; no labels used here."},
             {"metric": "Recoverable", "how": f"The subset ({truth_recoverable} cases) the synthetic world marks as worth recovering. The model never sees this label; it is the ground truth we score against."},
-            {"metric": "Recovered", "how": f"Verified payments only. We only count a case after Execution reports success AND Verification confirms the payment completed (Rs{recovered_amount} across {verified} cases)."},
+            {"metric": "Recovered", "how": f"Verified payments only, from the audit trail. We only count a case after the operator approves it, Execution reports success, AND Verification confirms the payment completed (Rs{recovered_amount} across {verified} cases)."},
             {"metric": "Recovery Rate", "how": "Recovered / Recoverable (same denominator in code and UI). If we can't prove a payment, we don't claim it."},
             {"metric": "Skipped / leaked", "how": f"{do_nothing} cases with Rs{leaked_away} at risk were deliberately not touched (repeated failure, low probability) — intelligent refusal, not blind retry."},
         ],
         "verified_cases": verified,
         "executed_cases": executed_ok,
-        "skipped_to_verify": skipped_to_verify,
     }
 
 
 
 @app.get("/api/cases/{case_id}")
 def case_detail(case_id: str) -> dict:
-    report = _report_for(case_id)
+    """Investigation view for a single case. Shows the planned state; no
+    money-moving action runs on this endpoint."""
+    match = next((f for f in _all_features() if f.recovery_case_id == case_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="recovery case not found")
+    report = plan_case(match, _get_policy())
     return {
         **_banner_row(),
-        "diagnosis": asdict(report.diagnosis),
-        "decision": asdict(report.decision),
-        "policy": asdict(report.policy),
-        "timeline": [asdict(step) for step in report.timeline],
-        "verification": asdict(report.verification),
+        "diagnosis": {
+            "root_cause": report.diagnosis.root_cause,
+            "confidence": report.diagnosis.confidence,
+            "evidence": report.diagnosis.evidence,
+        },
+        "decision": {
+            "action": report.decision.action,
+            "amount": report.decision.amount,
+            "probability_of_success": report.decision.probability_of_success,
+            "expected_recovery_value": report.decision.expected_recovery_value,
+            "rationale": report.decision.rationale,
+        },
+        "policy": {
+            "risk_level": report.policy.risk_level,
+            "requires_approval": report.policy.requires_approval,
+            "blocked": report.policy.blocked,
+        },
+        "timeline": [{"stage": step.stage, "detail": step.detail} for step in report.timeline],
+        "verification": {
+            "outcome": report.verification.outcome,
+            "recovered_amount": report.verification.recovered_amount,
+        },
     }
 
 
 @app.post("/api/cases/{case_id}/approve")
 def approve_case(case_id: str) -> dict:
-    """Operator approval: run policy-checked execution and return the verified result.
+    """Operator approval: execute the planned action and persist an audit row.
+
+    This is the ONLY endpoint that performs money-moving actions. The result is
+    saved to the executions table so a second approve on the same case returns
+    the stored result without executing again (idempotent).
 
     On the real Razorpay path a payment link is only reported as recovered after
     `paid` verification (polling the link status) confirms the payment settled.
     """
-    executor = _executor()
-    report = _report_for(case_id, executor)
-    if report.decision.action == "do_nothing":
+    match = next((f for f in _all_features() if f.recovery_case_id == case_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="recovery case not found")
+
+    # Idempotency: if already approved and executed, return stored result.
+    existing = load_execution(DB_PATH, case_id)
+    if existing is not None:
+        return {
+            **_banner_row(),
+            "executed": existing.success,
+            "already_approved": True,
+            "execution": {
+                "success": existing.success,
+                "adapter": existing.adapter,
+                "detail": existing.detail,
+            },
+            "verification": {
+                "outcome": existing.verification_outcome,
+                "recovered_amount": existing.recovered_amount,
+            },
+            "approved_at": existing.approved_at,
+        }
+
+    if match.leakage_type == "repeated_failure":
         raise HTTPException(status_code=409, detail="case is a do-nothing; nothing to approve")
-    verified: dict | None = None
+
+    executor = _executor()
+    report = run_case(match, executor, policy=_get_policy(), approved=True)
+
+    # Razorpay paid verification: only count recovery after the link is paid.
     outcome = report.verification.outcome
+    verified: dict | None = None
     if (
         report.execution
         and report.execution.adapter == "RAZORPAY_TEST_MODE"
@@ -221,15 +331,40 @@ def approve_case(case_id: str) -> dict:
     ):
         paid, detail = executor.verify(report.execution, case_id)
         verified = {"paid": paid, "detail": detail}
-        # Only claim recovery after the link is actually paid (fail-closed).
         outcome = "recovered" if paid else "failed"
+
+    # Persist to the audit trail.
+    now = datetime.now(timezone.utc).isoformat()
+    save_execution(
+        DB_PATH,
+        ExecutionRecord(
+            recovery_case_id=case_id,
+            action=report.decision.action,
+            adapter=report.execution.adapter if report.execution else "NONE",
+            success=report.execution.success if report.execution else False,
+            detail=report.execution.detail if report.execution else "no execution",
+            approved_at=now,
+            verification_outcome=outcome,
+            recovered_amount=report.verification.recovered_amount if outcome == "recovered" else 0,
+        ),
+    )
+
     return {
         **_banner_row(),
         "executed": report.execution is not None and report.execution.success,
-        "execution": asdict(report.execution) if report.execution else None,
-        "verification": {**asdict(report.verification), "outcome": outcome},
+        "already_approved": False,
+        "execution": {
+            "success": report.execution.success if report.execution else False,
+            "adapter": report.execution.adapter if report.execution else "NONE",
+            "detail": report.execution.detail if report.execution else "no execution",
+        },
+        "verification": {
+            "outcome": outcome,
+            "recovered_amount": report.verification.recovered_amount if outcome == "recovered" else 0,
+        },
         "verified": verified,
-        "timeline": [asdict(step) for step in report.timeline],
+        "timeline": [{"stage": step.stage, "detail": step.detail} for step in report.timeline],
+        "approved_at": now,
     }
 
 
@@ -254,7 +389,8 @@ def counterfactual() -> dict:
     report = _cached_evaluation()
 
     def wrong(m) -> int:
-        return round(m.false_intervention_rate * m.total_cases)
+        # True wrong actions: total minus correct (not rate * total).
+        return m.total_cases - round(m.action_accuracy * m.total_cases)
 
     kthma = report.methods["KTHMA"]
     rules = report.methods["Rule Based"]
@@ -311,7 +447,7 @@ table{width:100%;border-collapse:collapse;background:var(--panel);border:1px sol
 th{font-size:11px;text-transform:uppercase;color:var(--mut);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
 td{padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px}
 tr.click{cursor:pointer}tr.click:hover{background:var(--panel2)}
-.tag{padding:2px 8px;border-radius:10px;font-size:11px}.tag.recovered{background:#123c2e;color:var(--ok)}.tag.no_action_taken{background:#22304e;color:var(--mut)}
+.tag{padding:2px 8px;border-radius:10px;font-size:11px}.tag.recovered{background:#123c2e;color:var(--ok)}.tag.no_action_taken{background:#22304e;color:var(--mut)}.tag.pending_approval{background:#3a2f12;color:var(--warn)}.tag.auto_planned{background:#22304e;color:var(--mut)}
 button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:8px 16px;font-weight:600;cursor:pointer}
 button:disabled{background:var(--line);color:var(--mut);cursor:default}
 #panel{display:none;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px;margin-top:16px}
@@ -391,8 +527,9 @@ async function investigate(id){
     `<div><b>Why</b> ${d.decision.rationale}</div><div><b>Policy</b> ${d.policy.risk_level} risk · approval ${d.policy.requires_approval?'required':'not required'}</div>`;
   document.getElementById('p-steps').innerHTML=d.timeline.map(s=>`<div class="step"><b>${s.stage}</b><span>${s.detail}</span></div>`).join('');
   const btn=document.getElementById('approve');
-  btn.disabled=d.verification.outcome==='recovered'||d.decision.action==='do_nothing';
-  document.getElementById('p-msg').textContent=d.verification.outcome==='recovered'?'Already executed and verified.':'';
+  // Enable Approve for cases that require approval and haven't been executed.
+  btn.disabled=d.verification.outcome==='recovered'||d.decision.action==='do_nothing'||!d.policy.requires_approval;
+  document.getElementById('p-msg').textContent=d.verification.outcome==='recovered'?'Already executed and verified.':(d.policy.requires_approval?'This action requires operator approval before execution.':'');
 }
 document.getElementById('approve').onclick=async()=>{
   if(!selected)return;
@@ -400,7 +537,8 @@ document.getElementById('approve').onclick=async()=>{
   const d=await r.json();
   const msg=document.getElementById('p-msg');
   if(r.ok&&d.executed){msg.textContent='\\u2713 Executed via '+d.execution.adapter+' \\u2014 verified '+fmt(d.verification.recovered_amount)+' recovered';
-    document.getElementById('approve').disabled=true;investigate(selected);setTimeout(()=>location.reload(),1200);}
+    document.getElementById('approve').disabled=true;investigate(selected);setTimeout(()=>location.reload(),1500);}
+  else if(r.ok&&d.already_approved){msg.textContent='\\u2713 Already approved and executed ('+d.execution.adapter+').';document.getElementById('approve').disabled=true;}
   else{msg.textContent='\\u2717 '+(d.detail||(d.execution&&d.execution.detail)||'execution failed');}
 };
 fetch('/api/evaluate').then(r=>r.json()).then(d=>{document.getElementById('eval').textContent=d.table});
