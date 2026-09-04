@@ -1,9 +1,11 @@
 """One-click deterministic demo: at-risk -> investigate -> approve -> recover -> measure."""
 
 from kthma import generate
+from kthma.baselines import RuleBasedBaseline
 from kthma.execution import GroundedSimulatorExecutor
 from kthma.models import SplitDataset
-from kthma.pipeline import CaseReport, run_case
+from kthma.pipeline import run_case
+from kthma.recovery_model import fit_policy
 
 
 def _pick(dataset: SplitDataset, leakage_type: str, failure_reason: str | None = None):
@@ -55,7 +57,9 @@ def run_demo(seed: int = 42) -> str:
     total_at_risk = 0
     total_recovered = 0
     for title, features in scenarios:
-        report = run_case(features, executor)
+        # The demo showcases the full operator-in-the-loop flow: the operator
+        # reviews the plan and approves execution (approved=True).
+        report = run_case(features, executor, approved=True)
         total_at_risk += report.detection.revenue_at_risk
         total_recovered += report.verification.recovered_amount
         lines.append(f"{title}: Rs{report.detection.revenue_at_risk} at risk")
@@ -68,8 +72,68 @@ def run_demo(seed: int = 42) -> str:
     return "\n".join(lines)
 
 
+def _pick_counterfactual(dataset: SplitDataset, world: dict[str, tuple[bool, str]]):
+    """A payment_failure the synthetic world recovers via payment_link. A rule
+    engine keys off leakage_type and says retry_payment -> grounded world rejects
+    it (action mismatch) -> Rs0. The learned policy sees the interactions
+    (auth/insufficient reason, wallet method, low age) and picks payment_link -> recovers."""
+    candidates = [
+        f
+        for f in (*dataset.development.features, *dataset.holdout.features)
+        if f.leakage_type == "payment_failure"
+        and world.get(f.recovery_case_id, (False, ""))[0]
+        and world.get(f.recovery_case_id, (False, ""))[1] == "payment_link"
+        and f.amount == 2499
+    ]
+    if candidates:
+        return candidates[0]
+    raise LookupError("no payment_link-recoverable payment_failure case at Rs2499")
+
+
+def run_counterfactual(seed: int = 42) -> str:
+    """KTHMA vs rules, same case, side by side. The rules row is Rs0 and KTHMA recovers."""
+    dataset = generate(seed=seed, n=1000)
+    world = {
+        g.recovery_case_id: (g.recoverable, g.best_action)
+        for g in (*dataset.development.ground_truth, *dataset.holdout.ground_truth)
+    }
+    executor = GroundedSimulatorExecutor(world)
+    policy = fit_policy(dataset.development, seed=seed)
+
+    case = _pick_counterfactual(dataset, world)
+    rules = RuleBasedBaseline()
+    _ = rules.predict(case)  # rule decision shown in the report timeline
+    rules_report = run_case(case, executor, approved=True)  # rule default (no policy)
+    kthma_report = run_case(case, executor, policy, approved=True)
+
+    lines = [
+        "KTHMA COUNTERFACTUAL · DEMO MERCHANT · SYNTHETIC DATA",
+        "",
+        "One payment_failure case, identical inputs — what a rules engine does vs what KTHMA does:",
+        f"  case {case.recovery_case_id} · Rs{case.amount} · {case.payment_method} · {case.failure_reason}",
+        f"  world best action: {world[case.recovery_case_id][1]}",
+        "",
+        "RULES:        " + " | ".join(
+            f"{s.stage.lower()}={s.detail}" for s in rules_report.timeline
+        ),
+        f"RULES RESULT:  recovered Rs{rules_report.verification.recovered_amount}",
+        "",
+        "KTHMA:        " + " | ".join(
+            f"{s.stage.lower()}={s.detail}" for s in kthma_report.timeline
+        ),
+        f"KTHMA RESULT:  recovered Rs{kthma_report.verification.recovered_amount}",
+        "",
+        "INCREMENTAL:  +Rs" + format(
+            kthma_report.verification.recovered_amount - rules_report.verification.recovered_amount, ","
+        ) + " over the rules engine on the same case.",
+    ]
+    return "\n".join(lines)
+
+
 def main() -> int:
     print(run_demo())
+    print()
+    print(run_counterfactual())
     return 0
 
 

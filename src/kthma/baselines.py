@@ -44,14 +44,14 @@ class RuleBasedBaseline:
 
 
 class MLOnlyBaseline:
-    """Pure-python logistic regression predicting recoverable; action from rules."""
+    """Vectorized logistic regression (numpy) predicting recoverable; action from rules."""
 
     name = "ml_only"
 
     def __init__(self, learning_rate: float = 0.1, epochs: int = 300) -> None:
         self.learning_rate = learning_rate
         self.epochs = epochs
-        self.weights: list[float] = []
+        self.weights: np.ndarray | None = None
         self.bias = 0.0
 
     @staticmethod
@@ -66,23 +66,26 @@ class MLOnlyBaseline:
         ]
 
     def fit(self, split: Split) -> None:
-        vectors = [self._vector(f) for f in split.features]
-        labels = [1.0 if g.recoverable else 0.0 for g in split.ground_truth]
-        n_features = len(vectors[0])
-        self.weights = [0.0] * n_features
+        import numpy as np
+
+        X = np.array([self._vector(f) for f in split.features], dtype=float)
+        y = np.array([1.0 if g.recoverable else 0.0 for g in split.ground_truth], dtype=float)
+        self.weights = np.zeros(X.shape[1])
         self.bias = 0.0
+        n = len(y)
         for _ in range(self.epochs):
-            for vec, label in zip(vectors, labels):
-                z = self.bias + sum(w * x for w, x in zip(self.weights, vec))
-                p = 1.0 / (1.0 + pow(2.718281828459045, -z))
-                error = p - label
-                self.bias -= self.learning_rate * error
-                for i, x in enumerate(vec):
-                    self.weights[i] -= self.learning_rate * error * x
+            p = 1.0 / (1.0 + np.exp(-(self.bias + X @ self.weights)))
+            err = p - y
+            self.bias -= self.learning_rate * err.mean()
+            self.weights -= self.learning_rate * ((X.T @ err) / n)
 
     def predict(self, features: RecoveryCaseFeatures) -> Prediction:
-        z = self.bias + sum(w * x for w, x in zip(self.weights, self._vector(features)))
-        p_recoverable = 1.0 / (1.0 + pow(2.718281828459045, -z))
+        import numpy as np
+
+        vector = np.array(self._vector(features))
+        weights = self.weights if self.weights is not None else np.zeros(vector.shape[0])
+        z = self.bias + weights @ vector
+        p_recoverable = 1.0 / (1.0 + float(np.exp(-z)))
         recoverable = p_recoverable >= 0.5
         action = RULE_ACTIONS.get(features.leakage_type, "retry_payment")
         return Prediction(

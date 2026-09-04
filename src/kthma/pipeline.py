@@ -6,8 +6,18 @@ from dataclasses import dataclass, field
 
 from kthma.execution import ExecutionRequest, ExecutionResult, Executor, SimulatorExecutor
 from kthma.models import RecoveryCaseFeatures
+from kthma.recovery_model import RecoveryPolicy, recovery_value
 
 MONEY_MOVING = frozenset({"retry_payment", "retry_subscription", "payment_link"})
+# AGENTS.md policy tiers, made concrete:
+#   LOW    -> auto-execute (audit-only / refusal / no money moves)
+#   MEDIUM -> require operator approval
+#   HIGH   -> require explicit approval (large money-moving action)
+#   blocked -> hard cap exceeded: never execute, even with approval
+AUTO_ACTIONS = frozenset({"do_nothing", "escalate", "reminder", "alternate_method"})
+MEDIUM_AMOUNT_CAP = 10_000   # at/below: money-moving is medium risk
+HIGH_AMOUNT_CAP = 50_000     # above: money-moving is high risk (explicit approval)
+BLOCK_AMOUNT_CAP = 100_000   # above: refuse to act at all
 
 
 @dataclass(frozen=True)
@@ -39,6 +49,7 @@ class PolicyVerdict:
     action: str
     risk_level: str
     requires_approval: bool
+    blocked: bool = False
 
 
 @dataclass(frozen=True)
@@ -85,12 +96,12 @@ def diagnose(features: RecoveryCaseFeatures) -> Diagnosis:
         cause, confidence = "repeated_failed_attempts_low_recovery_probability", 0.9
     elif features.leakage_type == "checkout_abandonment":
         cause, confidence = "customer_entered_payment_flow_then_abandoned", 0.85
+    elif features.leakage_type == "subscription_failure":
+        cause, confidence = "mandate_debit_declined_with_payment_history", 0.75
     elif features.failure_reason == "bank_timeout":
         cause, confidence = "bank_timeout_high_purchase_intent", 0.8
     elif features.failure_reason == "insufficient_funds":
         cause, confidence = "insufficient_funds_temporary", 0.6
-    elif features.leakage_type == "subscription_failure":
-        cause, confidence = "mandate_debit_declined_with_payment_history", 0.75
     else:
         cause, confidence = "payment_failed", 0.5
     return Diagnosis(root_cause=cause, confidence=confidence, evidence=evidence)
@@ -108,7 +119,29 @@ def _probability(features: RecoveryCaseFeatures) -> float:
     return round(min(max(base, 0.05), 0.95), 2)
 
 
-def decide(features: RecoveryCaseFeatures) -> Decision:
+def decide(
+    features: RecoveryCaseFeatures,
+    policy: RecoveryPolicy | None = None,
+) -> Decision:
+    """Choose a recovery action. When a learned policy is provided it selects by
+    expected recovery value (amount x probability, do_nothing on the same axis);
+    otherwise a deterministic rule default covers cold-start and unit tests."""
+    if policy is not None:
+        action, probability = policy.predict(features)
+        expected = recovery_value(action, features.amount, probability)
+        if action == "do_nothing":
+            rationale = "learned: value below intervention cost; do not recover"
+        else:
+            rationale = f"learned policy ranked {action} highest by expected recovery value"
+        return Decision(
+            recovery_case_id=features.recovery_case_id,
+            action=action,
+            amount=features.amount,
+            probability_of_success=round(probability, 2),
+            expected_recovery_value=expected,
+            rationale=rationale,
+        )
+
     if features.leakage_type == "repeated_failure":
         action = "do_nothing"
         rationale = "multiple recent failures with low recovery probability; do not retry"
@@ -140,14 +173,92 @@ def decide(features: RecoveryCaseFeatures) -> Decision:
 
 
 def apply_policy(decision: Decision) -> PolicyVerdict:
-    if decision.action == "do_nothing":
+    # Audit-only / refusal actions auto-execute (they move no money).
+    if decision.action in AUTO_ACTIONS:
         return PolicyVerdict(decision.action, "low", False)
-    if decision.action in MONEY_MOVING:
+    # Unknown intervention that isn't a recognized money mover -> approval.
+    if decision.action not in MONEY_MOVING:
         return PolicyVerdict(decision.action, "medium", True)
+    # Money-moving: respect the amount caps (safety / Rs cap, AGENTS.md).
+    if decision.amount > BLOCK_AMOUNT_CAP:
+        return PolicyVerdict(decision.action, "blocked", False, blocked=True)
+    if decision.amount > HIGH_AMOUNT_CAP:
+        return PolicyVerdict(decision.action, "high", True)
     return PolicyVerdict(decision.action, "medium", True)
 
 
-def run_case(features: RecoveryCaseFeatures, executor: Executor | None = None) -> CaseReport:
+def plan_case(
+    features: RecoveryCaseFeatures,
+    policy: RecoveryPolicy | None = None,
+) -> CaseReport:
+    """Plan a recovery case without executing any money-moving action.
+
+    Used by GET endpoints and the dashboard case list so that no action is
+    ever performed until an operator explicitly approves it via POST /approve.
+    The pipeline runs through POLICY; execution is left as None and the
+    verification outcome is ``pending_approval`` when the action requires it.
+    """
+    timeline: list[TimelineStep] = []
+
+    detection = detect(features)
+    timeline.append(TimelineStep("DETECT", f"leakage detected: {detection.leakage_type}"))
+
+    diagnosis = diagnose(features)
+    timeline.append(TimelineStep("DIAGNOSE", f"root cause: {diagnosis.root_cause}"))
+
+    decision = decide(features, policy)
+    timeline.append(
+        TimelineStep("DECIDE", f"action={decision.action} erv=Rs{decision.expected_recovery_value}")
+    )
+
+    verdict = apply_policy(decision)
+    timeline.append(
+        TimelineStep("POLICY", f"risk={verdict.risk_level} requires_approval={verdict.requires_approval}")
+    )
+
+    if decision.action == "do_nothing" or verdict.blocked:
+        note = (
+            "no action taken; case closed without intervention"
+            if not verdict.blocked
+            else f"action blocked by policy: {verdict.risk_level} risk exceeds safe limit"
+        )
+        verification = Verification("no_action_taken", 0)
+        timeline.append(TimelineStep("VERIFY", note))
+    elif verdict.requires_approval:
+        verification = Verification("pending_approval", 0)
+        timeline.append(TimelineStep("VERIFY", "awaiting operator approval before execution"))
+    else:
+        # Low-risk auto-execute action (reminder / escalate / alternate_method):
+        # these move no money, so planning is also the final state.
+        verification = Verification("auto_planned", 0)
+        timeline.append(TimelineStep("VERIFY", "low-risk action; no execution on read path"))
+
+    return CaseReport(
+        detection=detection,
+        diagnosis=diagnosis,
+        decision=decision,
+        policy=verdict,
+        execution=None,
+        verification=verification,
+        timeline=timeline,
+    )
+
+
+def run_case(
+    features: RecoveryCaseFeatures,
+    executor: Executor | None = None,
+    policy: RecoveryPolicy | None = None,
+    approved: bool = False,
+) -> CaseReport:
+    """Run a recovery case end-to-end, optionally executing the action.
+
+    Parameters
+    ----------
+    approved:
+        Whether an operator has explicitly approved money-moving actions.
+        Defaults to ``False`` so that forgetting to pass it never executes.
+        Only ``POST /approve`` passes ``True``.
+    """
     executor = executor or SimulatorExecutor()
     timeline: list[TimelineStep] = []
 
@@ -157,27 +268,38 @@ def run_case(features: RecoveryCaseFeatures, executor: Executor | None = None) -
     diagnosis = diagnose(features)
     timeline.append(TimelineStep("DIAGNOSE", f"root cause: {diagnosis.root_cause}"))
 
-    decision = decide(features)
+    decision = decide(features, policy)
     timeline.append(
         TimelineStep("DECIDE", f"action={decision.action} erv=Rs{decision.expected_recovery_value}")
     )
 
-    policy = apply_policy(decision)
+    verdict = apply_policy(decision)
     timeline.append(
-        TimelineStep("POLICY", f"risk={policy.risk_level} requires_approval={policy.requires_approval}")
+        TimelineStep("POLICY", f"risk={verdict.risk_level} requires_approval={verdict.requires_approval}")
     )
 
     execution: ExecutionResult | None = None
-    if decision.action == "do_nothing":
+    if decision.action == "do_nothing" or verdict.blocked:
+        note = (
+            "no action taken; case closed without intervention"
+            if not verdict.blocked
+            else f"action blocked by policy: {verdict.risk_level} risk exceeds safe limit"
+        )
         verification = Verification("no_action_taken", 0)
-        timeline.append(TimelineStep("VERIFY", "no action taken; case closed without intervention"))
+        timeline.append(TimelineStep("VERIFY", note))
+    elif verdict.requires_approval and not approved:
+        # Money-moving action that needs operator approval but was not approved.
+        # Do not execute. This is the gate.
+        verification = Verification("pending_approval", 0)
+        timeline.append(TimelineStep("VERIFY", "awaiting operator approval before execution"))
     else:
+        # Either the action is low-risk (auto) or the operator approved it.
         execution = executor.execute(
             ExecutionRequest(
                 recovery_case_id=decision.recovery_case_id,
                 action=decision.action,
                 amount=decision.amount,
-                approved=policy.requires_approval,
+                approved=True,
             )
         )
         timeline.append(TimelineStep("ACT", f"adapter={execution.adapter} success={execution.success}"))
@@ -192,7 +314,7 @@ def run_case(features: RecoveryCaseFeatures, executor: Executor | None = None) -
         detection=detection,
         diagnosis=diagnosis,
         decision=decision,
-        policy=policy,
+        policy=verdict,
         execution=execution,
         verification=verification,
         timeline=timeline,

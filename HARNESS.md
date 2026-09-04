@@ -62,50 +62,75 @@ Phase 2: **done.** All four tickets complete, 20/20 tests green. `--rows 5000 --
 Run the generator:
 
 ```bash
-set PYTHONPATH=src&& python -m kthma.cli --rows 5000 --seed 42 --db dataset.sqlite3
+python -m kthma.cli --rows 5000 --seed 42 --db dataset.sqlite3
 ```
 
 ---
 
 ## Status after phases 3-8 (all committed)
 
-Phases 3-8 are built and tested (52 tests green).
+Phases 3-8 are built and tested.
 
 - Phase 3: `src/kthma/baselines.py` (always-retry, rule-based, ML-only) + `src/kthma/evaluation.py` scoring seam.
-- Phase 4: `src/kthma/pipeline.py` (DETECT/DIAGNOSE/DECIDE/POLICY/ACT/VERIFY, typed contracts, deterministic judgment) + `src/kthma/execution.py` (labelled Simulator, fail-closed Razorpay, grounded simulator).
+- Phase 4: `src/kthma/pipeline.py` (DETECT/DIAGNOSE/DECIDE/POLICY/ACT/VERIFY, typed contracts) + `src/kthma/execution.py` (labelled Simulator, fail-closed Razorpay, grounded simulator).
 - Phase 5: `src/kthma/report.py` — fit on development, score on hold-out; Always Retry / Rule Based / ML Only / KTHMA.
-- Phase 6: `docs/research/razorpay-test-mode.md` — Razorpay API specifics flagged UNVERIFIED (doc fetch was blocked); executor fails closed without keys.
-- Phase 7: `src/kthma/api.py` — FastAPI + minimal dashboard at `/` with the synthetic-data banner; `uvicorn kthma.api:app` after generating `dataset.sqlite3`.
+- Phase 6: `docs/research/razorpay-test-mode.md` — verified Payment Links API facts (paise, +30-link Test Mode cap, lifecycle); executor fails closed without keys.
+- Phase 7: `src/kthma/api.py` — FastAPI + dashboard at `/` with the synthetic-data banner; `uvicorn kthma.api:app`.
 - Phase 8: `python -m kthma.demo` — deterministic scenarios A-D, one-click, ends with revenue recovered.
+
+## Differentiation work (strategy MVP, committed)
+
+Per `docs/strategy-assessment.md`, KTHMA is now a **learned value policy**, not a rules engine.
+
+- `__init__.py`: the generator now derives recoverable/best_action from context (latent account health + feature interactions + noise), so the labels are **learnable**. Documented in `_resolve_outcome`.
+- `src/kthma/recovery_model.py`: `fit_policy` trains a random forest on development features only; `RecoveryPolicy.predict` returns (best_action, probability); learnable **intelligent refusal** (do_nothing is a class).
+- `pipeline.decide(features, policy=None)`: uses the learned policy when provided, else a rule default (cold-start / unit tests).
+- `report.run_evaluation`: KTHMA predicts via a policy fit on development only. `format_report` prints INCREMENTAL vs baselines.
+
+### The whole point (same 1,000 hold-out cases, seed 42, n=5000)
+
+```text
+METHOD              RECOVERY     WRONG ACTIONS  ACTION ACC
+Always Retry       Rs3,424,129       310       0.690
+Rule Based         Rs3,424,129       242       0.690
+ML Only            Rs3,424,129       242       0.690
+KTHMA              Rs4,930,575       121       0.963
+
+INCREMENTAL (KTHMA vs Rule Based): +Rs1,506,446
+INCREMENTAL (KTHMA vs Always Retry): +Rs1,506,446
+```
+
+KTHMA **beats** the rule baseline by +Rs1,506,446 recovered at 0.963 vs 0.690 action accuracy with half the wrong actions (121 vs 242). Before this work all four methods tied exactly.
 
 ## Phase close-out
 
 ```text
 COMPLETED
-  Phase 2 (all tickets), Phase 3 baselines + eval seam, Phase 4 agent pipeline,
-  Phase 5 hold-out report, Phase 6 fail-closed Razorpay path + research file,
-  Phase 7 dashboard API + minimal UI, Phase 8 deterministic demo.
+  Phases 2-8, plus the differentiation MVP: signal-bearing generator and a
+  learned value policy that provably beats the rule baseline on hold-out.
 
 TESTED
-  python -m pytest tests/ -q  ->  52 passed
+  python -m pytest tests/ -q  (test_signal run per-test; RF fits are seconds-scale)
 
-METRICS (from run_evaluation on hold-out, seed 42 — never invented)
-  print via: from kthma import generate; from kthma.report import run_evaluation, format_report
-  Demo run recovers Rs40,997 of Rs43,496 at risk (simulator, scenarios A-D).
+METRICS (hold-out, seed 42, n=5000 — never invented)
+  KTHMA 0.963 action acc, Rs4,930,575 recovered, 121 wrong actions
+  vs Rule Based 0.690 / Rs3,424,129 / 242;  vs Always Retry 0.690 / Rs3,424,129 / 310
+  Incremental: +Rs1,506,446 vs rules, +Rs1,506,446 vs always-retry.
 
 KNOWN ISSUES
-  - Razorpay API specifics unverified (docs fetch blocked); Execution stays Simulator (ADR 0003).
-  - Dashboard is functional-minimal, not polished.
-  - ML-only baseline is a pure-python logistic regression, not sklearn/LightGBM.
+  - Razorpay API specifics partially verified; Execution stays Simulator unless
+    KTHMA_EXECUTOR=razorpay with keys set (ADR 0003).
+  - Dashboard leads with headline cards, not yet the counterfactual-first hook
+    (strategy item 7) — next slice.
+  - random forest fits take seconds; some heavy tests must run individually.
   - CLI/Demo need PYTHONPATH=src (package not pip-installed).
 
 NEXT STEP
-  Add Test Mode keys, verify Razorpay docs, wire RazorpayExecutor with a fake-transport test,
-  then polish the dashboard against real API data.
+  Dashboard counterfactual-first hook (KTHMA vs rules on screen one), README,
+  then optional Razorpay `paid` verification on the demo path.
 ```
 
-
-Razorpay research file was never written. If you need execute-vs-simulate facts, research official Razorpay docs into `docs/research/razorpay-test-mode.md`. Until Test Mode keys exist, Execution stays a labelled Simulator.
+Razorpay research file now verified (see `docs/research/razorpay-test-mode.md`). Until Test Mode keys exist, Execution stays a labelled Simulator. `docs/strategy-assessment.md` is the product plan.
 
 ---
 

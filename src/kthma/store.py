@@ -1,5 +1,7 @@
 """SQLite persistence for SplitDataset: features vs ground truth stores."""
 
+from dataclasses import dataclass
+
 from sqlalchemy import Boolean, Integer, String, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
@@ -42,6 +44,25 @@ class GroundTruthRow(Base):
     expected_outcome: Mapped[int] = mapped_column(Integer)
     amount: Mapped[int] = mapped_column(Integer)
     intended_scenario: Mapped[str] = mapped_column(String)
+
+
+class ExecutionRow(Base):
+    """Persisted audit trail of every recovery action taken.
+
+    Keyed by recovery_case_id so that approve is idempotent: a second approve
+    on the same case returns the stored row instead of executing again.
+    """
+
+    __tablename__ = "executions"
+
+    recovery_case_id: Mapped[str] = mapped_column(String, primary_key=True)
+    action: Mapped[str] = mapped_column(String)
+    adapter: Mapped[str] = mapped_column(String)
+    success: Mapped[bool] = mapped_column(Boolean)
+    detail: Mapped[str] = mapped_column(String)
+    approved_at: Mapped[str] = mapped_column(String)
+    verification_outcome: Mapped[str] = mapped_column(String)
+    recovered_amount: Mapped[int] = mapped_column(Integer)
 
 
 def _engine(db_path: str):
@@ -140,3 +161,83 @@ def load_ground_truth(db_path: str, split: str) -> tuple[GroundTruth, ...]:
             )
             for r in rows
         )
+
+
+@dataclass(frozen=True)
+class ExecutionRecord:
+    recovery_case_id: str
+    action: str
+    adapter: str
+    success: bool
+    detail: str
+    approved_at: str
+    verification_outcome: str
+    recovered_amount: int
+
+
+def save_execution(db_path: str, record: ExecutionRecord) -> None:
+    """Persist an execution row. Idempotent: calling twice for the same case
+    overwrites the row rather than duplicating it."""
+    engine = _engine(db_path)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        existing = session.get(ExecutionRow, record.recovery_case_id)
+        if existing is None:
+            session.add(
+                ExecutionRow(
+                    recovery_case_id=record.recovery_case_id,
+                    action=record.action,
+                    adapter=record.adapter,
+                    success=record.success,
+                    detail=record.detail,
+                    approved_at=record.approved_at,
+                    verification_outcome=record.verification_outcome,
+                    recovered_amount=record.recovered_amount,
+                )
+            )
+        else:
+            existing.action = record.action
+            existing.adapter = record.adapter
+            existing.success = record.success
+            existing.detail = record.detail
+            existing.approved_at = record.approved_at
+            existing.verification_outcome = record.verification_outcome
+            existing.recovered_amount = record.recovered_amount
+        session.commit()
+
+
+def load_execution(db_path: str, recovery_case_id: str) -> ExecutionRecord | None:
+    engine = _engine(db_path)
+    with Session(engine) as session:
+        row = session.get(ExecutionRow, recovery_case_id)
+        if row is None:
+            return None
+        return ExecutionRecord(
+            recovery_case_id=row.recovery_case_id,
+            action=row.action,
+            adapter=row.adapter,
+            success=row.success,
+            detail=row.detail,
+            approved_at=row.approved_at,
+            verification_outcome=row.verification_outcome,
+            recovered_amount=row.recovered_amount,
+        )
+
+
+def load_all_executions(db_path: str) -> dict[str, ExecutionRecord]:
+    engine = _engine(db_path)
+    with Session(engine) as session:
+        rows = session.scalars(select(ExecutionRow)).all()
+        return {
+            r.recovery_case_id: ExecutionRecord(
+                recovery_case_id=r.recovery_case_id,
+                action=r.action,
+                adapter=r.adapter,
+                success=r.success,
+                detail=r.detail,
+                approved_at=r.approved_at,
+                verification_outcome=r.verification_outcome,
+                recovered_amount=r.recovered_amount,
+            )
+            for r in rows
+        }

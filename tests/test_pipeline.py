@@ -14,7 +14,8 @@ def _case_with_type(leakage_type: str):
 
 
 def test_report_contains_all_six_stages_in_order():
-    report = run_case(_case_with_type("payment_failure"), SimulatorExecutor())
+    # With approved=True, a medium-risk money action runs end-to-end.
+    report = run_case(_case_with_type("payment_failure"), SimulatorExecutor(), approved=True)
     stages = [step.stage for step in report.timeline]
     assert stages == ["DETECT", "DIAGNOSE", "DECIDE", "POLICY", "ACT", "VERIFY"]
 
@@ -57,7 +58,8 @@ def test_repeated_failure_is_not_executed():
 
 
 def test_recoverable_case_is_executed_and_verified():
-    report = run_case(_case_with_type("checkout_abandonment"), SimulatorExecutor())
+    # approved=True so the medium-risk action actually executes
+    report = run_case(_case_with_type("checkout_abandonment"), SimulatorExecutor(), approved=True)
     assert report.execution is not None
     assert report.execution.adapter == "SIMULATOR"
     assert report.verification.outcome == "recovered"
