@@ -62,7 +62,7 @@ Phase 2: **done.** All four tickets complete, 20/20 tests green. `--rows 5000 --
 Run the generator:
 
 ```bash
-set PYTHONPATH=src&& python -m kthma.cli --rows 5000 --seed 42 --db dataset.sqlite3
+python -m kthma.cli --rows 5000 --seed 42 --db dataset.sqlite3
 ```
 
 ---
@@ -87,20 +87,20 @@ Per `docs/strategy-assessment.md`, KTHMA is now a **learned value policy**, not 
 - `pipeline.decide(features, policy=None)`: uses the learned policy when provided, else a rule default (cold-start / unit tests).
 - `report.run_evaluation`: KTHMA predicts via a policy fit on development only. `format_report` prints INCREMENTAL vs baselines.
 
-### The whole point (same 1,000 hold-out cases, seed 42)
+### The whole point (same 1,000 hold-out cases, seed 42, n=5000)
 
 ```text
-METHOD              RECOVERY   WRONG ACTIONS  ACTION ACC
-Always Retry       Rs150,277             200       0.115
-Rule Based         Rs623,802              84       0.600
-ML Only            Rs610,806              63       0.600
-KTHMA            Rs1,055,640              58       0.935
+METHOD              RECOVERY     WRONG ACTIONS  ACTION ACC
+Always Retry       Rs3,424,129       310       0.690
+Rule Based         Rs3,424,129       242       0.690
+ML Only            Rs3,424,129       242       0.690
+KTHMA              Rs4,930,575       121       0.963
 
-INCREMENTAL (KTHMA vs Rule Based): +Rs431,838
-INCREMENTAL (KTHMA vs Always Retry): +Rs905,363
+INCREMENTAL (KTHMA vs Rule Based): +Rs1,506,446
+INCREMENTAL (KTHMA vs Always Retry): +Rs1,506,446
 ```
 
-KTHMA **beats** the rule baseline by +Rs431,838 recovered at 0.935 vs 0.600 action accuracy with fewer false interventions. Before this work all four methods tied exactly.
+KTHMA **beats** the rule baseline by +Rs1,506,446 recovered at 0.963 vs 0.690 action accuracy with half the wrong actions (121 vs 242). Before this work all four methods tied exactly.
 
 ## Phase close-out
 
@@ -112,10 +112,10 @@ COMPLETED
 TESTED
   python -m pytest tests/ -q  (test_signal run per-test; RF fits are seconds-scale)
 
-METRICS (hold-out, seed 42 — never invented)
-  KTHMA 0.935 action acc, Rs1,055,640 recovered, 58 wrong actions
-  vs Rule Based 0.600 / Rs623,802 / 84;  vs Always Retry 0.115 / Rs150,277 / 200
-  Incremental: +Rs431,838 vs rules, +Rs905,363 vs always-retry.
+METRICS (hold-out, seed 42, n=5000 — never invented)
+  KTHMA 0.963 action acc, Rs4,930,575 recovered, 121 wrong actions
+  vs Rule Based 0.690 / Rs3,424,129 / 242;  vs Always Retry 0.690 / Rs3,424,129 / 310
+  Incremental: +Rs1,506,446 vs rules, +Rs1,506,446 vs always-retry.
 
 KNOWN ISSUES
   - Razorpay API specifics partially verified; Execution stays Simulator unless

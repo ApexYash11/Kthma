@@ -103,17 +103,20 @@ class RazorpayPaymentLinkTransport:
         raw = f"{self.key_id}:{self.key_secret}".encode()
         return "Basic " + base64.b64encode(raw).decode()
 
-    def request(self, method: str, path: str, payload: dict) -> dict:
+    def request(self, method: str, path: str, payload: dict | None = None) -> dict:
         import json as _json
         from urllib import request as _request
 
+        payload = payload or {}
+        has_body = method.upper() not in ("GET", "HEAD")
+        data = _json.dumps(payload).encode() if has_body else None
+        headers = {"Authorization": self._auth_header()}
+        if has_body:
+            headers["Content-Type"] = "application/json"
         req = _request.Request(
             self.BASE_URL + path,
-            data=_json.dumps(payload).encode(),
-            headers={
-                "Authorization": self._auth_header(),
-                "Content-Type": "application/json",
-            },
+            data=data,
+            headers=headers,
             method=method,
         )
         with _request.urlopen(req, timeout=self.timeout) as resp:
@@ -129,6 +132,7 @@ class HybridRazorpayExecutor:
     def __init__(self, transport: RazorpayPaymentLinkTransport) -> None:
         self.transport = transport
         self._simulator = SimulatorExecutor()
+        self._last_link_id: str | None = None
 
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
         if not request.approved:
@@ -158,9 +162,35 @@ class HybridRazorpayExecutor:
             )
         except Exception as exc:  # surface as failed execution, never crash the operator flow
             return ExecutionResult(False, "RAZORPAY_TEST_MODE", f"razorpay error: {exc}")
+        self._last_link_id = str(response["id"])
         return ExecutionResult(
             True,
             "RAZORPAY_TEST_MODE",
             f"payment link created: {response['id']} {response.get('short_url', '')}",
         )
+
+    def verify(self, result: ExecutionResult, recovery_case_id: str) -> tuple[bool, str]:
+        """Poll the created payment link and confirm the payment actually settled.
+
+        Real `paid` verification on the Demo path: a link is only counted as
+        recovered after Razorpay reports status == 'paid'. Fails closed — a
+        simulated/batch execution or any transport error never passes.
+        """
+        if result.adapter != "RAZORPAY_TEST_MODE" or self._last_link_id is None:
+            return (
+                False,
+                "verification unavailable: this path runs a labelled simulator, "
+                "not a real Razorpay payment link",
+            )
+        try:
+            response = self.transport.request(
+                "GET",
+                f"/v1/payment_links/{self._last_link_id}",
+                {},
+            )
+        except Exception as exc:
+            return False, f"verify error: {exc}"
+        status = str(response.get("status", "unknown"))
+        paid = status == "paid"
+        return paid, f"razorpay payment link {self._last_link_id} status: {status}"
 

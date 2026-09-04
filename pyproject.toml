@@ -12,7 +12,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[project.scripts]
+kthma-demo = "kthma.demo:main"
 
 [build-system]
 requires = ["setuptools>=68"]
